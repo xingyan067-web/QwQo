@@ -148,20 +148,27 @@ window.onload = async function() {
     });
 
     // 修复：监听键盘弹出，解决 iOS 遮挡问题，确保输入框跟随
+    // 关键修改：不仅设置高度，还设置 top，防止浏览器自动推挤导致的黑边
     if (window.visualViewport) {
         const appRoot = document.getElementById('app-root');
-        window.visualViewport.addEventListener('resize', () => {
-            // 动态调整根容器高度，使其匹配可视区域（避开键盘）
+        
+        const handleResize = () => {
+            // 强制 app-root 的高度等于可视区域高度（减去键盘高度）
             appRoot.style.height = window.visualViewport.height + 'px';
+            // 强制 app-root 的顶部对齐可视区域顶部（抵消浏览器自动推挤）
+            appRoot.style.top = window.visualViewport.offsetTop + 'px';
             
-            if (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT') {
+            // 滚动到底部确保输入框可见
+            if(document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT') {
                 setTimeout(() => wcScrollToBottom(true), 100);
             }
-        });
-        window.visualViewport.addEventListener('scroll', () => {
-            // 防止页面整体被推上去后无法恢复
+            
+            // 强制滚动到顶部，防止页面整体偏移
             window.scrollTo(0, 0);
-        });
+        };
+
+        window.visualViewport.addEventListener('resize', handleResize);
+        window.visualViewport.addEventListener('scroll', handleResize); // iOS 有时触发 scroll 而不是 resize
     }
 
     // 监听聊天输入框焦点，主动滚动到底部
