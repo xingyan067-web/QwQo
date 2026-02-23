@@ -135,6 +135,7 @@ window.onload = async function() {
         // 初始化恋人空间数据
         await lsLoadData();
         lsInitNpcLoop(); // 启动 NPC 循环
+        lsRenderWidget(); // 渲染桌面小组件
     } catch (e) {
         console.error("WeChat DB Init failed", e);
     }
@@ -2331,6 +2332,19 @@ async function wcTriggerAI(charIdOverride = null) {
    - 系统会自动将此标签转换为图片。
    - 列表：${availableStickers.join(', ')}\n`;
         }
+        
+        // --- 强化：桌面小组件联动 ---
+        let triggerWidget = false;
+        if (lsState.isLinked && lsState.boundCharId === charId && lsState.widgetEnabled) {
+            if (Math.random() * 100 < lsState.widgetUpdateFreq) {
+                triggerWidget = true;
+            }
+        }
+
+        if (triggerWidget) {
+            systemPrompt += `\n【强制动作】你现在必须向用户的桌面小组件发送更新。请在回复的最后包含标签 [小组件:照片:图片画面描述] 或 [小组件:便利贴:你想说的话(30字以内)]。二选一。\n`;
+        }
+
         systemPrompt += `\n请根据上下文自然地回复。你可以混合使用文本和特殊指令。如果当前聊天氛围适合发朋友圈，或者你想评论对方的朋友圈，请使用相应的指令。`;
 
         let limit = config.contextLimit > 0 ? config.contextLimit : 30;
@@ -2431,14 +2445,14 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
     // 1. 解析所有动作并存入队列
     if (remainingText.includes('[收款]')) {
         actions.push({ type: 'transfer_action', status: 'received' });
-        remainingText = remainingText.replace(/\[收款\]/g, '');
+        remainingText = remainingText.replace(/$$收款$$/g, '');
     }
     if (remainingText.includes('[退款]')) {
         actions.push({ type: 'transfer_action', status: 'rejected' });
-        remainingText = remainingText.replace(/\[退款\]/g, '');
+        remainingText = remainingText.replace(/$$退款$$/g, '');
     }
 
-    const transferRegex = /\[转账:([\d.]+):(.*?)\]/g;
+    const transferRegex = /$$转账:([\d.]+):(.*?)$$/g;
     let match;
     while ((match = transferRegex.exec(remainingText)) !== null) {
         const amount = parseFloat(match[1]).toFixed(2);
@@ -2449,14 +2463,14 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
     }
     remainingText = remainingText.replace(transferRegex, '');
 
-    const voiceRegex = /\[语音\](.*?)\[\/语音\]/g;
+    const voiceRegex = /$$语音$$(.*?)$$\/语音$$/g;
     while ((match = voiceRegex.exec(remainingText)) !== null) {
         actions.push({ type: 'voice', content: match[1].trim() });
     }
     remainingText = remainingText.replace(voiceRegex, '');
 
     // 朋友圈相关操作直接执行，不延迟
-    const momentRegex = /\[动态:(.*?):(.*?)]/g;
+    const momentRegex = /$$动态:(.*?):(.*?)]/g;
     while ((match = momentRegex.exec(remainingText)) !== null) {
         wcAIHandleMomentPost(charId, match[1], match[2]);
     }
@@ -2474,29 +2488,50 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
     }
     remainingText = remainingText.replace(replyRegex, '');
 
-    const likeRegex = /\[点赞:(\d+)\]/g;
+    const likeRegex = /\[点赞:(\d+)$$/g;
     while ((match = likeRegex.exec(remainingText)) !== null) {
         wcAIHandleLike(charId, match[1]);
     }
     remainingText = remainingText.replace(likeRegex, '');
 
     // 引用消息解析
-    const quoteRegex = /\[引用:(.*?)\](.*)/;
+    const quoteRegex = /$$引用:(.*?)$$(.*)/;
     const quoteMatch = remainingText.match(quoteRegex);
     let quoteContent = null;
     if (quoteMatch) {
         quoteContent = quoteMatch[1];
         remainingText = quoteMatch[2]; // 剩余部分作为回复内容
     }
+    
+    // --- 强化：解析桌面小组件指令 ---
+    const widgetRegex = /$$小组件:(照片|便利贴):(.*?)]/g;
+    while ((match = widgetRegex.exec(remainingText)) !== null) {
+        const type = match[1];
+        const content = match[2];
+        if (type === '照片') {
+            lsState.widgetData.type = 'photo';
+            lsState.widgetData.photoDesc = content;
+            lsState.widgetData.currentMode = 'photo';
+            lsAddFeed(`向桌面发送了一张照片`);
+        } else {
+            lsState.widgetData.type = 'note';
+            lsState.widgetData.noteText = content;
+            lsState.widgetData.currentMode = 'note';
+            lsAddFeed(`向桌面发送了一张便利贴`);
+        }
+        lsSaveData();
+        lsRenderWidget();
+    }
+    remainingText = remainingText.replace(widgetRegex, '');
 
     // 表情包混合解析逻辑 (支持开头、中间、结尾)
     // 将文本按表情包标签分割
-    const parts = remainingText.split(/(\[表情包:.*?\])/g);
+    const parts = remainingText.split(/(\[表情包:.*?$$)/g);
     
     parts.forEach(part => {
         if (!part.trim()) return;
         
-        const stickerMatch = part.match(/^\[表情包:(.*?)\]$/);
+        const stickerMatch = part.match(/^$$表情包:(.*?)$$$/);
         if (stickerMatch) {
             const desc = stickerMatch[1].trim();
             const url = wcFindStickerUrlMulti(stickerGroupIds, desc);
@@ -4436,18 +4471,15 @@ function wcRenderPhoneChats() {
             const userAvatar = (char.chatConfig && char.chatConfig.userAvatar) ? char.chatConfig.userAvatar : wcState.user.avatar;
             imgHtml = `<img src="${userAvatar}" class="wc-avatar" style="width:40px;height:40px;border-radius:4px;">`;
         } else {
-            // 修改：使用随机图片头像，不再使用纯色块
-            // 尝试从通讯录中查找对应的头像（如果有保存的话），否则随机分配一个并保存
+            // 强化：使用随机图片头像，不再使用纯色块
             let avatarUrl = chat.avatar;
             if (!avatarUrl) {
-                // 尝试在通讯录中查找
                 const contact = char.phoneData.contacts.find(c => c.name === chat.name);
                 if (contact && contact.avatar) {
                     avatarUrl = contact.avatar;
                 } else {
                     avatarUrl = getRandomNpcAvatar();
                 }
-                // 保存到 chat 对象中，避免刷新变动
                 chat.avatar = avatarUrl;
                 wcSaveData();
             }
@@ -5018,7 +5050,6 @@ function wcOpenShareCardModal() {
     list.innerHTML = '';
     
     // 修改：允许分享给当前正在查看手机的角色（即“发给自己”或“发给当前聊天对象”）
-    // 之前是 filter(c => c.id !== wcState.editingCharId)，现在移除这个过滤
     const targets = wcState.characters; 
     
     if (targets.length === 0) {
@@ -5473,7 +5504,16 @@ const lsState = {
     isLinked: false, // 是否开启账号关联
     npcFreq: 30, // NPC 消息频率 (分钟)
     feed: [], // 动态日志 [{id, text, time, avatar}]
-    npcInterval: null // 定时器
+    npcInterval: null, // 定时器
+    // --- 新增：桌面小组件状态 ---
+    widgetEnabled: false,
+    widgetUpdateFreq: 20, // 聊天时触发更新的概率 (%)
+    widgetData: {
+        type: 'photo', // 'photo' 或 'note'
+        photoDesc: '一张拍立得照片',
+        noteText: '今天也要开心哦！',
+        currentMode: 'photo' // 当前显示的模式
+    }
 };
 
 // --- Lovers Space Core Functions ---
@@ -5486,6 +5526,9 @@ async function lsLoadData() {
         lsState.isLinked = data.isLinked || false;
         lsState.npcFreq = data.npcFreq || 30;
         lsState.feed = data.feed || [];
+        lsState.widgetEnabled = data.widgetEnabled || false;
+        lsState.widgetUpdateFreq = data.widgetUpdateFreq || 20;
+        if (data.widgetData) lsState.widgetData = data.widgetData;
     }
 }
 
@@ -5496,7 +5539,10 @@ async function lsSaveData() {
         startDate: lsState.startDate,
         isLinked: lsState.isLinked,
         npcFreq: lsState.npcFreq,
-        feed: lsState.feed
+        feed: lsState.feed,
+        widgetEnabled: lsState.widgetEnabled,
+        widgetUpdateFreq: lsState.widgetUpdateFreq,
+        widgetData: lsState.widgetData
     });
 }
 
@@ -5554,9 +5600,6 @@ function lsSendInvite(charId) {
         // 发送邀请卡片到聊天
         wcAddMessage(charId, 'me', 'invite', '邀请开启恋人空间', { status: 'pending' });
         
-        // 修改：不再自动触发 AI 回复，允许用户继续发送消息
-        // wcTriggerAI(charId); 
-        
         lsRenderView();
     }
 }
@@ -5580,7 +5623,6 @@ function lsCancelInvite() {
 function lsResendInvite() {
     if (lsState.pendingCharId) {
         wcAddMessage(lsState.pendingCharId, 'me', 'invite', '邀请开启恋人空间', { status: 'pending' });
-        // 同样不触发 AI
         alert("邀请已重新发送");
     }
 }
@@ -5644,6 +5686,38 @@ function lsRenderMain() {
     document.getElementById('ls-npc-freq').value = lsState.npcFreq;
     document.getElementById('ls-npc-freq-display').innerText = lsState.npcFreq + 'm';
 
+    // --- 动态注入小组件设置 UI ---
+    const settingsTab = document.getElementById('ls-tab-settings');
+    if (settingsTab && !document.getElementById('ls-widget-settings-group')) {
+        const widgetGroup = document.createElement('div');
+        widgetGroup.id = 'ls-widget-settings-group';
+        widgetGroup.className = 'ls-settings-group';
+        widgetGroup.style.marginTop = '20px';
+        widgetGroup.innerHTML = `
+            <div class="ls-setting-item">
+                <span>开启桌面小组件 (2x2)</span>
+                <label class="wc-switch">
+                    <input type="checkbox" id="ls-toggle-widget" onchange="lsToggleWidget(this)">
+                    <span class="wc-slider"></span>
+                </label>
+            </div>
+            <div class="ls-setting-item" style="flex-direction: column; align-items: flex-start;">
+                <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 10px;">
+                    <span>聊天时更新小组件概率</span>
+                    <span id="ls-widget-freq-display" style="color: #888;">20%</span>
+                </div>
+                <input type="range" id="ls-widget-freq" min="0" max="100" step="5" style="width: 100%;" oninput="lsUpdateWidgetFreq(this.value)">
+            </div>
+        `;
+        settingsTab.appendChild(widgetGroup);
+    }
+
+    if (document.getElementById('ls-toggle-widget')) {
+        document.getElementById('ls-toggle-widget').checked = lsState.widgetEnabled;
+        document.getElementById('ls-widget-freq').value = lsState.widgetUpdateFreq;
+        document.getElementById('ls-widget-freq-display').innerText = lsState.widgetUpdateFreq + '%';
+    }
+
     // Feed Tab
     lsRenderFeed();
 }
@@ -5683,12 +5757,27 @@ function lsUpdateNpcFreq(val) {
     lsInitNpcLoop(); // 重启定时器
 }
 
+// --- 新增：小组件设置交互 ---
+function lsToggleWidget(checkbox) {
+    lsState.widgetEnabled = checkbox.checked;
+    lsSaveData();
+    lsRenderWidget();
+}
+
+function lsUpdateWidgetFreq(val) {
+    lsState.widgetUpdateFreq = parseInt(val);
+    document.getElementById('ls-widget-freq-display').innerText = val + '%';
+    lsSaveData();
+}
+
 function lsUnbind() {
     if (confirm("确定要解除恋人关系吗？所有记录将被清空。")) {
         lsState.boundCharId = null;
         lsState.startDate = null;
         lsState.feed = [];
+        lsState.widgetEnabled = false;
         lsSaveData();
+        lsRenderWidget();
         lsRenderView();
     }
 }
@@ -5861,6 +5950,124 @@ async function lsTriggerNpcMessage() {
         
     } catch (e) {
         console.error("NPC Gen Error", e);
+    }
+}
+
+// --- 新增：桌面小组件渲染与交互 ---
+function lsRenderWidget() {
+    let widget = document.getElementById('ls-desktop-widget');
+    if (!widget) {
+        widget = document.createElement('div');
+        widget.id = 'ls-desktop-widget';
+        widget.innerHTML = `
+            <div class="ls-widget-inner" id="ls-widget-inner">
+                <div class="ls-widget-front">
+                    <div class="ls-widget-sticker" onclick="lsToggleWidgetMode(event)"></div>
+                    <div class="ls-widget-photo" id="ls-widget-photo" onclick="lsShowWidgetPhotoDesc()">
+                        <svg viewBox="0 0 24 24" style="width:50%;height:50%;color:#ccc;"><path fill="currentColor" d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                    </div>
+                    <div class="ls-widget-photo-desc" id="ls-widget-photo-label">Polaroid</div>
+                </div>
+                <div class="ls-widget-back">
+                    <div class="ls-widget-sticker" onclick="lsToggleWidgetMode(event)"></div>
+                    <div class="ls-widget-note-text" id="ls-widget-note-text"></div>
+                </div>
+            </div>
+        `;
+        
+        const homeGrid = document.getElementById('homeGrid');
+        if (homeGrid) {
+            homeGrid.appendChild(widget);
+        }
+        
+        if (!document.getElementById('ls-widget-style')) {
+            const style = document.createElement('style');
+            style.id = 'ls-widget-style';
+            style.innerHTML = `
+                #ls-desktop-widget {
+                    position: absolute;
+                    width: 140px; height: 140px;
+                    /* 占据第四行和第五行，第二列和第三列的近似位置 */
+                    top: 360px; left: 50%;
+                    transform: translateX(-50%);
+                    z-index: 10;
+                    perspective: 1000px;
+                }
+                .ls-widget-inner {
+                    position: relative; width: 100%; height: 100%;
+                    transition: transform 0.6s; transform-style: preserve-3d;
+                    box-shadow: 2px 4px 10px rgba(0,0,0,0.3);
+                    border-radius: 4px;
+                }
+                #ls-desktop-widget.flipped .ls-widget-inner { transform: rotateY(180deg); }
+                .ls-widget-front, .ls-widget-back {
+                    position: absolute; width: 100%; height: 100%;
+                    backface-visibility: hidden; border-radius: 4px;
+                    background: #fff; display: flex; flex-direction: column;
+                    align-items: center; padding: 8px; box-sizing: border-box;
+                }
+                .ls-widget-back { transform: rotateY(180deg); background: #FFF9C4; justify-content: center;}
+                .ls-widget-sticker {
+                    position: absolute; top: -12px; left: -12px;
+                    width: 35px; height: 35px;
+                    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23FF6B6B"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>') no-repeat center center;
+                    background-size: contain; cursor: pointer; z-index: 20;
+                    filter: drop-shadow(1px 2px 2px rgba(0,0,0,0.2));
+                }
+                .ls-widget-photo {
+                    width: 100%; height: 85%; background: #f4f4f4;
+                    border: 1px solid #eee; display:flex; justify-content:center; align-items:center;
+                    overflow: hidden; cursor: pointer;
+                }
+                .ls-widget-photo-desc { font-size: 11px; color: #555; margin-top: 6px; font-family: 'Courier New', Courier, monospace; font-weight: bold; }
+                .ls-widget-note-text { font-size: 14px; color: #333; font-family: 'Comic Sans MS', cursive, sans-serif; line-height: 1.5; text-align: left; width: 100%; padding: 5px; word-break: break-all;}
+            `;
+            document.head.appendChild(style);
+        }
+    }
+
+    if (lsState.widgetEnabled && lsState.boundCharId) {
+        widget.style.display = 'block';
+        const data = lsState.widgetData;
+        
+        if (data.currentMode === 'note') {
+            widget.classList.add('flipped');
+        } else {
+            widget.classList.remove('flipped');
+        }
+        
+        document.getElementById('ls-widget-note-text').innerText = data.noteText || '暂无留言';
+        
+        const photoContainer = document.getElementById('ls-widget-photo');
+        if (data.photoDesc) {
+            photoContainer.innerHTML = `<div style="font-size:10px; color:#999; padding:5px; text-align:center; line-height:1.2;">[AI画面]<br>${data.photoDesc.substring(0,15)}...</div>`;
+        } else {
+            photoContainer.innerHTML = `<svg viewBox="0 0 24 24" style="width:50%;height:50%;color:#ccc;"><path fill="currentColor" d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>`;
+        }
+        
+    } else {
+        widget.style.display = 'none';
+    }
+}
+
+function lsToggleWidgetMode(e) {
+    e.stopPropagation();
+    const widget = document.getElementById('ls-desktop-widget');
+    if (widget.classList.contains('flipped')) {
+        widget.classList.remove('flipped');
+        lsState.widgetData.currentMode = 'photo';
+    } else {
+        widget.classList.add('flipped');
+        lsState.widgetData.currentMode = 'note';
+    }
+    lsSaveData();
+}
+
+function lsShowWidgetPhotoDesc() {
+    if (lsState.widgetData.photoDesc) {
+        alert(`【照片画面描述】\n${lsState.widgetData.photoDesc}`);
+    } else {
+        alert("暂无照片描述");
     }
 }
 
