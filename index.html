@@ -1457,7 +1457,8 @@
                                         <select id="wc-setting-css-preset-select" class="wc-form-input" style="flex: 1;" onchange="wcApplyCssPreset(this.value)">
                                             <option value="">选择预设...</option>
                                         </select>
-                                        <button class="wc-ios-btn-block" style="width: 80px; padding: 0;" onclick="wcSaveCssPreset()">保存</button>
+                                        <button class="wc-ios-btn-block" style="width: 60px; padding: 0; background: var(--wc-danger-red);" onclick="wcDeleteCssPreset()">删除</button>
+                                        <button class="wc-ios-btn-block" style="width: 60px; padding: 0;" onclick="wcSaveCssPreset()">保存</button>
                                     </div>
                                 </div>
                             </div>
@@ -1624,8 +1625,23 @@
             </div>
         </div>
 
-        <!-- 手机装修弹窗 (移出 WeChat) -->
-        <div id="wc-modal-phone-settings" class="wc-modal-overlay" style="z-index: 12000;">
+        <!-- 分享名片选择列表弹窗 (移出 WeChat) -->
+        <div id="wc-modal-share-card-select" class="wc-modal hidden" style="z-index: 12000;">
+            <div class="wc-modal-content">
+                <div class="wc-modal-header">
+                    <h3>选择分享对象</h3>
+                    <button class="wc-close-btn" onclick="wcCloseModal('wc-modal-share-card-select')">&times;</button>
+                </div>
+                <div class="wc-modal-body">
+                    <div id="wc-share-card-list" style="max-height: 300px; overflow-y: auto;">
+                        <!-- JS 注入好友列表 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 手机装修弹窗 (移出 WeChat，置于 body 最末尾，确保层级最高) -->
+        <div id="wc-modal-phone-settings" class="wc-modal-overlay" style="z-index: 15000;">
             <div class="wc-modal-content" style="border-radius: 16px 16px 0 0; position: absolute; bottom: 0; width: 100%; max-width: 100%;">
                 <div class="wc-modal-header">
                     <h3>手机装修</h3>
@@ -1667,22 +1683,8 @@
                             </div>
                         </div>
                     </div>
-                    <button class="wc-btn-primary" onclick="wcSavePhoneSettings()" style="background: #007AFF; color: white;">保存装修</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 分享名片选择列表弹窗 (移出 WeChat) -->
-        <div id="wc-modal-share-card-select" class="wc-modal hidden" style="z-index: 12000;">
-            <div class="wc-modal-content">
-                <div class="wc-modal-header">
-                    <h3>选择分享对象</h3>
-                    <button class="wc-close-btn" onclick="wcCloseModal('wc-modal-share-card-select')">&times;</button>
-                </div>
-                <div class="wc-modal-body">
-                    <div id="wc-share-card-list" style="max-height: 300px; overflow-y: auto;">
-                        <!-- JS 注入好友列表 -->
-                    </div>
+                    <!-- 修改：按钮背景色改为黑色 -->
+                    <button class="wc-btn-primary" onclick="wcSavePhoneSettings()" style="background: #000000; color: white;">保存装修</button>
                 </div>
             </div>
         </div>
