@@ -1,5 +1,5 @@
 // --- 全局变量 ---
-const totalApps = 7; // 修复: 明确定义 totalApps
+const totalApps = 7; 
 let iconPresets = [];
 let fontPresets = [];
 let wallpaperPresets = [];
@@ -28,7 +28,7 @@ let isDragging = false;
 let wcActiveSimChatId = null; // 当前正在查看的模拟对话ID
 let currentPhoneContact = null; // 当前正在查看的通讯录联系人
 
-// NPC 头像列表 (用于手机仿真器)
+// --- 强化：NPC 头像列表 (必须使用提供的图片) ---
 const npcAvatarList = [
     "https://i.postimg.cc/26HCtpHm/Image-1771583312811-653.jpg",
     "https://i.postimg.cc/Px6d7G6T/Image-1771583329136-980.jpg",
@@ -146,12 +146,28 @@ window.onload = async function() {
         }
     });
 
-    // 监听键盘弹出，解决 iOS 遮挡问题
+    // 修复：监听键盘弹出，解决 iOS 遮挡问题，确保输入框跟随
     if (window.visualViewport) {
+        const appRoot = document.getElementById('app-root');
         window.visualViewport.addEventListener('resize', () => {
+            // 动态调整根容器高度，使其匹配可视区域（避开键盘）
+            appRoot.style.height = window.visualViewport.height + 'px';
+            
             if (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT') {
                 setTimeout(() => wcScrollToBottom(true), 100);
             }
+        });
+        window.visualViewport.addEventListener('scroll', () => {
+            // 防止页面整体被推上去后无法恢复
+            window.scrollTo(0, 0);
+        });
+    }
+
+    // 监听聊天输入框焦点，主动滚动到底部
+    const chatInput = document.getElementById('wc-chat-input');
+    if (chatInput) {
+        chatInput.addEventListener('focus', () => {
+            setTimeout(() => wcScrollToBottom(true), 300);
         });
     }
 
@@ -172,7 +188,7 @@ window.onload = async function() {
         });
     }
 
-    // 修复：通用输入框确认按钮事件绑定
+    // 通用输入框确认按钮事件绑定
     const generalConfirmBtn = document.getElementById('wc-general-input-confirm');
     if (generalConfirmBtn) {
         generalConfirmBtn.onclick = function() {
@@ -200,6 +216,12 @@ window.onload = async function() {
             // 自动调整高度
             this.style.height = 'auto';
             this.style.height = (this.scrollHeight) + 'px';
+        });
+        simInput.addEventListener('focus', () => {
+            setTimeout(() => {
+                const container = document.getElementById('wc-sim-chat-history');
+                if(container) container.scrollTop = container.scrollHeight;
+            }, 300);
         });
     }
 };
@@ -965,7 +987,27 @@ function renderGroupView() {
         const header = document.createElement('div');
         header.className = 'wb-group-header';
         header.innerHTML = `<span class="wb-group-name">${group}</span><span class="wb-group-count">${groupEntries.length}</span>`;
+        
+        // 修复：长按编辑分组名称
+        let pressTimer;
+        const startPress = (e) => {
+            pressTimer = setTimeout(() => {
+                editWorldbookGroup(group);
+            }, 600);
+        };
+        const cancelPress = () => {
+            clearTimeout(pressTimer);
+        };
+        
+        header.addEventListener('touchstart', startPress, {passive: true});
+        header.addEventListener('touchend', cancelPress);
+        header.addEventListener('touchmove', cancelPress);
+        header.addEventListener('mousedown', startPress);
+        header.addEventListener('mouseup', cancelPress);
+        header.addEventListener('mouseleave', cancelPress);
+
         header.onclick = () => { groupItem.querySelector('.wb-group-content').classList.toggle('expanded'); };
+        
         const deleteBtn = document.createElement('div');
         deleteBtn.className = 'wb-delete-btn';
         deleteBtn.innerText = '删除';
@@ -985,6 +1027,21 @@ function renderGroupView() {
         groupItem.appendChild(content);
         container.appendChild(groupItem);
     });
+}
+
+function editWorldbookGroup(oldName) {
+    if (oldName === 'Default') return alert("默认分组不可重命名");
+    const newName = prompt("重命名分组", oldName);
+    if (newName && newName.trim() !== "" && newName !== oldName) {
+        if (worldbookGroups.includes(newName)) return alert("分组名已存在");
+        const idx = worldbookGroups.indexOf(oldName);
+        if (idx !== -1) worldbookGroups[idx] = newName;
+        worldbookEntries.forEach(e => {
+            if (e.type === oldName) e.type = newName;
+        });
+        saveWorldbookData();
+        renderGroupView();
+    }
 }
 
 function deleteGroup(groupName) {
@@ -1246,6 +1303,7 @@ function renderApiPresets() {
     });
 }
 
+// --- 修复：应用 API 预设时同步切换模型 ---
 function applyApiPreset(idx) {
     const p = apiPresets[idx];
     if (p) {
@@ -1253,6 +1311,26 @@ function applyApiPreset(idx) {
         document.getElementById('apiKey').value = p.key;
         document.getElementById('tempSlider').value = p.temp;
         document.getElementById('tempDisplay').innerText = p.temp;
+        
+        // 尝试设置模型
+        if (p.model) {
+            const select = document.getElementById('modelSelect');
+            // 检查选项是否存在，不存在则添加
+            let exists = false;
+            for (let i = 0; i < select.options.length; i++) {
+                if (select.options[i].value === p.model) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                const opt = document.createElement('option');
+                opt.value = p.model;
+                opt.innerText = p.model + " (预设)";
+                select.appendChild(opt);
+            }
+            select.value = p.model;
+        }
     }
 }
 
@@ -1283,6 +1361,7 @@ function closeModal() {
     document.getElementById('modalOverlay').classList.remove('active');
 }
 
+// --- 修复：保存 API 预设时包含模型 ---
 async function confirmSavePreset() {
     const name = document.getElementById('modalInput').value;
     if (!name) return alert("请输入名称");
@@ -1310,7 +1389,8 @@ async function confirmSavePreset() {
             name,
             baseUrl: document.getElementById('apiBaseUrl').value,
             key: document.getElementById('apiKey').value,
-            temp: document.getElementById('tempSlider').value
+            temp: document.getElementById('tempSlider').value,
+            model: document.getElementById('modelSelect').value // 新增：保存模型
         });
         renderApiPresets();
     }
@@ -1636,7 +1716,7 @@ async function wcLoadData() {
     try {
         const user = await wcDb.get('kv_store', 'user');
         if (user) wcState.user = user;
-        else wcState.user.avatar = 'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg' + ' width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="#007AFF"/></svg>');
+        else wcState.user.avatar = 'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="#007AFF"/></svg>');
 
         const wallet = await wcDb.get('kv_store', 'wallet');
         if (wallet) wcState.wallet = wallet;
@@ -1981,7 +2061,7 @@ function wcScrollToBottom(force = false) {
     
     requestAnimationFrame(() => {
         if (anchor) {
-            anchor.scrollIntoView({ behavior: "smooth", block: "end" });
+            anchor.scrollIntoView({ behavior: force ? "auto" : "smooth", block: "end" });
         } else {
             area.scrollTop = area.scrollHeight;
         }
@@ -2157,26 +2237,21 @@ async function wcTriggerAI(charIdOverride = null) {
         let systemPrompt = `你正在参与一个沉浸式的微信聊天模拟。严格扮演你的角色，不要破坏沉浸感。\n`;
         systemPrompt += currentTimeInfo;
         
-        systemPrompt += `【时间感知模块】
-1. 你不能自行假设时间流逝。任何“经过了多久”的判断，必须依据现实时间或由我明确告知的时间信息。
-2. 每次回复前，请读取“当前系统时间”，并基于此判断间隔。
-3. 如果我未提供新的时间信息，请保持默认状态，不可生成“已过1小时”“天亮了”等推测性内容。
-4. 在回复中涉及时间时，请体现逻辑一致性。
-5. 允许我在任何时刻通过提示语更新时间，你需即时根据最新时间修正自己的表述。
-6. 若我使用「现在」一词，请视为现实当前时间（即系统当前时间），不要提前或延迟。
-7. 你可以记录上次对话中的时间节点，并在下次对话时主动比对。如果我没有更新时间，也不要自行虚构时间变化。
-
-【时间行为逻辑】
-你具有准确的时间意识。不会凭空判断时间流逝，而是基于现实时间或对方提供的时间数据进行逻辑判断。
-在每次互动时，根据时间差计算具体分钟数，并用自然的语气表现出“确实过了多久”。\n\n`;
-
-        systemPrompt += `【重要回复规则】
-1. 必须模拟即时通讯软件聊天风格，口语化、碎片化。
-2. 严禁长篇大论，严禁小说体。
-3. 频繁使用换行符，每一句对话独占一行。
-4. 将长段话拆分成多条短消息发送（用换行分隔）。
-5. 不要使用书面语，像用手机打字一样。
-6. 严禁使用逗号将多个独立的句子强行连接成一句长句。\n\n`;
+        // --- 强化：对话格式与碎片化 ---
+        systemPrompt += `【强制对话风格 - 必须严格遵守】
+1. **禁止长文本**：绝对不要发送长段落。
+2. **碎片化输出**：将一句话拆分成多个短句，用换行符分隔。
+3. **气泡分离**：每一行内容都会被解析为一个独立的气泡。请频繁换行。
+4. **语气自然**：少用标点，多用空格或直接断句。可以使用单个Emoji或单个词作为单独的一行。
+5. **示例**：
+   错误：你好呀，今天天气真不错，我们要不要出去玩？
+   正确：
+   你好呀
+   今天天气真不错
+   要不要出去玩？
+6. **不完整句**：允许使用不完整的句子、断裂的语句，模拟真实打字时的随意感。
+7. **节奏松弛**：不要一次性把所有信息都发完，分多次发送。
+\n\n`;
 
         systemPrompt += `【你的角色设定】\n名字：${char.name}\n人设：${char.prompt || '无'}\n\n`;
         systemPrompt += `【对方(用户)设定】\n名字：${config.userName || wcState.user.name}\n人设：${config.userPersona || '无'}\n\n`;
@@ -2230,6 +2305,7 @@ async function wcTriggerAI(charIdOverride = null) {
 警告：必须严格遵守格式，不要在标签外添加多余的解释性文字！
 
 1. 发送语音：[语音]你想说的话[/语音]
+   - 必须使用此格式发送语音消息。
    - 错误示例：[语音]你好[/语音] (发送了一段语音)
    - 正确示例：[语音]你好[/语音]
 
@@ -2252,7 +2328,7 @@ async function wcTriggerAI(charIdOverride = null) {
         if (availableStickers.length > 0) {
             systemPrompt += `10. 发送表情包：[表情包:描述]
    - 警告：描述必须严格匹配【可用表情包】列表中的内容！不要自己编造描述！
-   - 如果你想表达的情绪不在列表中，请使用文字表达，不要强行使用表情包标签。
+   - 系统会自动将此标签转换为图片。
    - 列表：${availableStickers.join(', ')}\n`;
         }
         systemPrompt += `\n请根据上下文自然地回复。你可以混合使用文本和特殊指令。如果当前聊天氛围适合发朋友圈，或者你想评论对方的朋友圈，请使用相应的指令。`;
@@ -2427,10 +2503,11 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
             if (url) {
                 actions.push({ type: 'sticker', url });
             } else {
+                // 如果找不到表情包，降级为文本，但带括号提示
                 actions.push({ type: 'text', content: `*(发送了一个表情: ${desc})*` });
             }
         } else {
-            // 普通文本，按换行符再分割
+            // 普通文本，按换行符再分割，实现碎片化气泡
             const lines = part.split('\n');
             lines.forEach(line => {
                 if (line.trim()) {
@@ -3202,117 +3279,6 @@ function wcSaveMemorySettings() {
     alert("回忆设置已保存");
 }
 
-async function wcGenerateSummary() {
-    const start = parseInt(document.getElementById('wc-mem-start-idx').value);
-    const end = parseInt(document.getElementById('wc-mem-end-idx').value);
-    
-    if (isNaN(start) || isNaN(end) || start > end) {
-        alert("请输入有效的起始和结束层数");
-        return;
-    }
-
-    const char = wcState.characters.find(c => c.id === wcState.activeChatId);
-    const msgs = wcState.chats[wcState.activeChatId] || [];
-    
-    const sliceMsgs = msgs.slice(start, end + 1);
-    if (sliceMsgs.length === 0) {
-        alert("该范围内没有消息");
-        return;
-    }
-
-    const apiConfig = await idb.get('ios_theme_api_config');
-    if (!apiConfig || !apiConfig.baseUrl || !apiConfig.key || !apiConfig.model) {
-        alert("请先配置 API");
-        return;
-    }
-
-    // 获取手动选择的世界书条目
-    const checkboxes = document.querySelectorAll('#wc-mem-summary-wb-list input[type="checkbox"]:checked');
-    const selectedWbIds = Array.from(checkboxes).map(cb => cb.value);
-
-    wcCloseModal('wc-modal-memory-summary');
-    wcShowLoading("正在生成总结...");
-
-    try {
-        let prompt = `请总结以下对话的主要内容，提取关键信息和情感变化，字数控制在200字以内。\n`;
-        
-        if (selectedWbIds.length > 0) {
-            prompt += `\n【参考背景资料】\n`;
-            selectedWbIds.forEach(id => {
-                const entry = worldbookEntries.find(e => e.id.toString() === id.toString());
-                if (entry) prompt += `- ${entry.title}: ${entry.desc}\n`;
-            });
-        }
-
-        prompt += `\n【对话内容】\n`;
-        sliceMsgs.forEach(m => {
-            const sender = m.sender === 'me' ? '用户' : char.name;
-            let content = m.content;
-            if (m.type !== 'text') content = `[${m.type}]`;
-            prompt += `${sender}: ${content}\n`;
-        });
-
-        const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiConfig.key}`
-            },
-            body: JSON.stringify({
-                model: apiConfig.model,
-                messages: [{ role: "user", content: prompt }],
-                temperature: 0.5
-            })
-        });
-
-        if (!response.ok) throw new Error("API Error");
-        const data = await response.json();
-        const summary = data.choices[0].message.content;
-
-        if (!char.memories) char.memories = [];
-        char.memories.unshift({
-            id: Date.now(),
-            type: 'summary',
-            content: `[总结 ${start}-${end}] ${summary}`,
-            time: Date.now()
-        });
-        wcSaveData();
-        wcRenderMemories();
-        wcShowSuccess("总结生成成功");
-
-    } catch (e) {
-        wcShowError("生成失败");
-    }
-}
-
-function wcAddManualMemory() {
-    const text = document.getElementById('wc-mem-manual-text').value;
-    if (!text) return;
-    const char = wcState.characters.find(c => c.id === wcState.activeChatId);
-    if (!char.memories) char.memories = [];
-    
-    char.memories.unshift({
-        id: Date.now(),
-        type: 'manual',
-        content: text,
-        time: Date.now()
-    });
-    wcSaveData();
-    wcRenderMemories();
-    document.getElementById('wc-mem-manual-text').value = '';
-    wcCloseModal('wc-modal-memory-add');
-}
-
-function wcSaveAiMemoryCount() {
-    const count = document.getElementById('wc-mem-ai-read-count').value;
-    const char = wcState.characters.find(c => c.id === wcState.activeChatId);
-    if (!char.chatConfig) char.chatConfig = {};
-    char.chatConfig.aiMemoryCount = parseInt(count) || 5;
-    wcSaveData();
-    wcCloseModal('wc-modal-memory-ai-count');
-    alert(`已设置发送给AI的记忆条数为: ${char.chatConfig.aiMemoryCount}`);
-}
-
 // --- WeChat General Input ---
 function wcOpenGeneralInput(title, callback, isPassword = false) {
     document.getElementById('wc-general-input-title').innerText = title;
@@ -3941,7 +3907,11 @@ function wcOpenPhoneSettings() {
     ['msg', 'browser', 'cart', 'settings'].forEach(id => {
         document.getElementById(`wc-preview-icon-${id}`).style.display = 'none';
     });
-    wcOpenModal('wc-modal-phone-settings');
+    
+    // 修复：直接操作具有极高 z-index 的弹窗
+    const modal = document.getElementById('wc-modal-phone-settings');
+    modal.classList.remove('hidden');
+    modal.classList.add('active');
 }
 
 function wcSavePhoneSettings() {
@@ -4639,6 +4609,7 @@ async function wcSimTriggerAI() {
 
         prompt += `\n请根据以上信息和当前的聊天记录，回复 ${char.name} 的消息。\n`;
         
+        // --- 强化：模拟器对话格式 ---
         prompt += `【回复格式严格要求】：
 1. 必须模拟即时通讯软件的聊天风格。
 2. 保持回复简短有力，禁止长篇大论的小说体。
@@ -4842,11 +4813,11 @@ async function wcGeneratePhoneContacts() {
         };
 
         // 3. 合并通讯录，User 始终在第一位
-        // 修改：为每个联系人分配随机头像
+        // 强化：为每个联系人分配随机头像 (必须使用提供的图片)
         const newContacts = (result.contacts || []).map(c => ({ 
             ...c, 
             id: Date.now() + Math.random(),
-            avatar: getRandomNpcAvatar() // 分配头像
+            avatar: getRandomNpcAvatar() // 强制使用图片列表
         }));
         char.phoneData.contacts = [userContact, ...newContacts];
 
@@ -5264,6 +5235,19 @@ function wcSaveCssPreset() {
     }
 }
 
+function wcDeleteCssPreset() {
+    const select = document.getElementById('wc-setting-css-preset-select');
+    const idx = select.value;
+    if (idx === "") return alert("请先选择一个预设");
+    
+    if (confirm("确定删除该 CSS 预设吗？")) {
+        wcState.cssPresets.splice(idx, 1);
+        wcSaveData();
+        wcUpdateCssPresetSelect();
+        document.getElementById('wc-setting-custom-css').value = ""; // 清空输入框
+    }
+}
+
 function wcApplyCssPreset(idx) {
     if (idx === "") return;
     const preset = wcState.cssPresets[idx];
@@ -5332,9 +5316,14 @@ function wcOpenModal(id) {
     modal.classList.remove('hidden');
     modal.classList.add('active'); 
     wcState.tempImage = ''; 
+    
+    // 修复：每次打开添加角色弹窗时清空输入框
     if(id === 'wc-modal-add-char') {
         document.getElementById('wc-preview-char-avatar').style.display = 'none';
         document.getElementById('wc-icon-char-upload').style.display = 'block';
+        document.getElementById('wc-input-char-name').value = '';
+        document.getElementById('wc-input-char-note').value = '';
+        document.getElementById('wc-input-char-prompt').value = '';
     }
 }
 
@@ -5874,3 +5863,4 @@ async function lsTriggerNpcMessage() {
         console.error("NPC Gen Error", e);
     }
 }
+
