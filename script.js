@@ -309,8 +309,10 @@ async function loadAllData() {
             document.getElementById('tempSlider').value = apiConfig.temp;
             document.getElementById('tempDisplay').innerText = apiConfig.temp;
         }
+        // 修复：增加空值检查，防止 HTML 中没有 apiMaxCallLimit 元素时报错
         if (apiConfig.limit) {
-            document.getElementById('apiMaxCallLimit').value = apiConfig.limit;
+            const limitEl = document.getElementById('apiMaxCallLimit');
+            if (limitEl) limitEl.value = apiConfig.limit;
         }
         if (apiConfig.model) {
              const select = document.getElementById('modelSelect');
@@ -1252,12 +1254,14 @@ function filterWorldbook(keyword) {
 
 // --- API 设置逻辑 ---
 async function saveApiConfig() {
+    // 修复：增加对 apiMaxCallLimit 的空值检查
+    const limitEl = document.getElementById('apiMaxCallLimit');
     const config = {
         baseUrl: document.getElementById('apiBaseUrl').value,
         key: document.getElementById('apiKey').value,
         temp: document.getElementById('tempSlider').value,
         model: document.getElementById('modelSelect').value,
-        limit: parseInt(document.getElementById('apiMaxCallLimit').value) || 0
+        limit: limitEl ? (parseInt(limitEl.value) || 0) : 0
     };
     await idb.set('ios_theme_api_config', config);
     alert("API 配置已保存");
