@@ -2420,14 +2420,17 @@ async function wcTriggerAI(charIdOverride = null) {
         }
 
         let availableStickers = [];
-        if (config.stickerGroupIds && config.stickerGroupIds.length > 0) {
-            config.stickerGroupIds.forEach(groupId => {
-                const group = wcState.stickerCategories[groupId];
-                if (group && group.list) {
-                    group.list.forEach(s => availableStickers.push(s.desc));
-                }
-            });
-        }
+        // MODIFIED: Default to all groups if none selected
+        const targetStickerGroups = (config.stickerGroupIds && config.stickerGroupIds.length > 0) 
+            ? config.stickerGroupIds 
+            : wcState.stickerCategories.map((_, i) => i);
+
+        targetStickerGroups.forEach(groupId => {
+            const group = wcState.stickerCategories[groupId];
+            if (group && group.list) {
+                group.list.forEach(s => availableStickers.push(s.desc));
+            }
+        });
         
         if (availableStickers.length > 0) {
             const limitedStickers = availableStickers.slice(0, 50); 
@@ -2586,14 +2589,14 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
 
     if (remainingText.includes('[收款]')) {
         actions.push({ type: 'transfer_action', status: 'received' });
-        remainingText = remainingText.replace(/$$收款$$/g, '');
+        remainingText = remainingText.replace(/\[收款\]/g, '');
     }
     if (remainingText.includes('[退款]')) {
         actions.push({ type: 'transfer_action', status: 'rejected' });
-        remainingText = remainingText.replace(/$$退款$$/g, '');
+        remainingText = remainingText.replace(/\[退款\]/g, '');
     }
 
-    const transferRegex = /$$转账:([\d.]+):(.*?)$$/g;
+    const transferRegex = /\[转账:([\d.]+):(.*?)]/g;
     let match;
     while ((match = transferRegex.exec(remainingText)) !== null) {
         const amount = parseFloat(match[1]).toFixed(2);
@@ -2604,13 +2607,13 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
     }
     remainingText = remainingText.replace(transferRegex, '');
 
-    const voiceRegex = /$$语音$$(.*?)$$\/语音$$/g;
+    const voiceRegex = /\[语音\](.*?)\[\/语音\]/g;
     while ((match = voiceRegex.exec(remainingText)) !== null) {
         actions.push({ type: 'voice', content: match[1].trim() });
     }
     remainingText = remainingText.replace(voiceRegex, '');
 
-    const momentRegex = /$$动态:(.*?):(.*?)]/g;
+    const momentRegex = /\[动态:(.*?):(.*?)]/g;
     while ((match = momentRegex.exec(remainingText)) !== null) {
         wcAIHandleMomentPost(charId, match[1], match[2]);
     }
@@ -2628,13 +2631,13 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
     }
     remainingText = remainingText.replace(replyRegex, '');
 
-    const likeRegex = /\[点赞:(\d+)$$/g;
+    const likeRegex = /\[点赞:(\d+)\]/g;
     while ((match = likeRegex.exec(remainingText)) !== null) {
         wcAIHandleLike(charId, match[1]);
     }
     remainingText = remainingText.replace(likeRegex, '');
 
-    const quoteRegex = /$$引用:(.*?)$$(.*)/;
+    const quoteRegex = /\[引用:(.*?)\](.*)/;
     const quoteMatch = remainingText.match(quoteRegex);
     let quoteContent = null;
     if (quoteMatch) {
@@ -2642,7 +2645,7 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
         remainingText = quoteMatch[2]; 
     }
     
-    const widgetRegex = /$$小组件:(照片|便利贴):(.*?)]/g;
+    const widgetRegex = /\[小组件:(照片|便利贴):(.*?)]/g;
     while ((match = widgetRegex.exec(remainingText)) !== null) {
         const type = match[1];
         const content = match[2];
@@ -2663,23 +2666,25 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
     remainingText = remainingText.replace(widgetRegex, '');
 
     // 关键修改：兼容中英文冒号，并按换行符强制分割，防止AI把多句话挤在一个气泡
-    const parts = remainingText.split(/(\[表情包[:：].*?$$)/g);
+    // MODIFIED: Better regex for spaces
+    const parts = remainingText.split(/(\[\s*表情包\s*[:：].*?\])/g);
     
     parts.forEach(part => {
         if (!part.trim()) return;
         
-        const stickerMatch = part.match(/^$$表情包[:：](.*?)$$$/);
+        // MODIFIED: Better regex match
+        const stickerMatch = part.match(/^\[\s*表情包\s*[:：]\s*(.*?)\s*\]$/);
         if (stickerMatch) {
             const desc = stickerMatch[1].trim();
             const url = wcFindStickerUrlMulti(stickerGroupIds, desc);
             if (url) {
                 actions.push({ type: 'sticker', url });
             } else {
-                actions.push({ type: 'text', content: `*(发送了一个表情: ${desc})*` });
+                actions.push({ type: 'text', content: `[表情: ${desc}]` });
             }
         } else {
             // 强制按标点符号换行（防止AI不听话挤在一起）
-            let textPart = part.replace(/([。！？!?])\s*(?=[^\n])/g, "\$1\n");
+            let textPart = part.replace(/([。！？!?])\s*(?=[^\n])/g, "$1\n");
             const lines = textPart.split('\n');
             lines.forEach(line => {
                 if (line.trim()) {
@@ -2812,11 +2817,15 @@ function wcAIHandleTransfer(charId, status) {
 }
 
 function wcFindStickerUrlMulti(groupIds, desc) {
-    if (!groupIds || groupIds.length === 0) return null;
-    for (const groupId of groupIds) {
-        const group = wcState.stickerCategories[groupId];
+    // MODIFIED: Search all if no specific groups, and use trim/lowercase for loose matching
+    const groupsToSearch = (groupIds && groupIds.length > 0) 
+        ? groupIds.map(id => wcState.stickerCategories[id]).filter(g => g)
+        : wcState.stickerCategories;
+
+    for (const group of groupsToSearch) {
         if (group && group.list) {
-            const sticker = group.list.find(s => s.desc === desc);
+            // Loose matching
+            const sticker = group.list.find(s => s.desc.trim() === desc.trim());
             if (sticker) return sticker.url;
         }
     }
@@ -6511,4 +6520,3 @@ function wcSaveAiMemoryCount() {
         }
     };
 })();
-
