@@ -20,6 +20,11 @@ let pendingDeleteType = '';
 let pendingDeleteIndex = -1;
 let pendingSaveType = '';
 
+// 拖拽与编辑模式全局变量
+let isHomeEditMode = false;
+let backupGridLayout = {};
+let backupWidgetPosition = {};
+
 let dragItem = null;
 let dragGhost = null;
 let dragStartX = 0;
@@ -122,7 +127,7 @@ const idb = {
 // --- 初始化 ---
 window.onload = async function() {
     initGrid(); 
-    loadAllData(); // 加载 IndexedDB 数据
+    await loadAllData(); // 加载 IndexedDB 数据 (含布局恢复)
     startClock();
     initBattery(); // 初始化电量
     initWeather(); // 初始化天气
@@ -282,7 +287,7 @@ async function loadAllData() {
             applyFont(themeData.fontUrl);
         }
 
-        // 5. 加载 App 布局
+        // 5. 加载 App 布局 (图标和名称)
         const appsData = JSON.parse(await idb.get('ios_theme_apps') || '[]');
         appsData.forEach(app => {
             const nameEl = document.getElementById(`name-${app.id}`);
@@ -293,6 +298,12 @@ async function loadAllData() {
                 iconEl.style.backgroundColor = 'transparent';
             }
         });
+
+        // 5.1 恢复桌面布局 (位置)
+        const layoutData = await idb.get('ios_theme_layout');
+        if (layoutData) {
+            restoreGridLayout(layoutData);
+        }
 
         // 6. 加载预设
         const presets = await idb.get('ios_theme_presets') || {};
@@ -309,7 +320,6 @@ async function loadAllData() {
             document.getElementById('tempSlider').value = apiConfig.temp;
             document.getElementById('tempDisplay').innerText = apiConfig.temp;
         }
-        // 修复：增加空值检查，防止 HTML 中没有 apiMaxCallLimit 元素时报错
         if (apiConfig.limit) {
             const limitEl = document.getElementById('apiMaxCallLimit');
             if (limitEl) limitEl.value = apiConfig.limit;
@@ -335,6 +345,27 @@ async function loadAllData() {
     } catch (e) {
         console.error("IndexedDB Load Error:", e);
     }
+}
+
+// --- 恢复桌面布局 ---
+function restoreGridLayout(layout) {
+    const grid = document.getElementById('homeGrid');
+    const cells = Array.from(grid.children); 
+    
+    for (const [cellIndex, appId] of Object.entries(layout)) {
+        const cell = cells.find(c => c.dataset.index == cellIndex);
+        const app = document.getElementById(appId);
+        
+        if (cell && app) {
+            cell.appendChild(app);
+        }
+    }
+}
+
+// --- 保存桌面布局 ---
+async function saveGridLayout() {
+    const layout = getCurrentGridLayout();
+    await idb.set('ios_theme_layout', layout);
 }
 
 // --- 数据保存逻辑 ---
@@ -407,7 +438,7 @@ async function analyzeStorage() {
         '世界书': ['ios_theme_wb_entries', 'ios_theme_wb_groups'],
         '图片/媒体': ['ios_theme_widget', 'ios_theme_apple', 'ios_theme_apps'],
         '预设库': ['ios_theme_presets'],
-        '系统设置': ['ios_theme_settings', 'ios_theme_api_config']
+        '系统设置': ['ios_theme_settings', 'ios_theme_api_config', 'ios_theme_layout']
     };
     const colors = { '世界书': '#007aff', '图片/媒体': '#ff9500', '预设库': '#34c759', '系统设置': '#8e8e93' };
     let usage = {};
@@ -470,7 +501,8 @@ async function exportThemeOnly() {
         'ios_theme_widget',   // 小组件
         'ios_theme_apps',     // 图标布局
         'ios_theme_presets',  // 预设
-        'ios_theme_apple'     // Apple ID 头像
+        'ios_theme_apple',    // Apple ID 头像
+        'ios_theme_layout'    // 桌面布局
     ];
 
     for (let key of themeKeys) {
@@ -821,18 +853,16 @@ function initGrid() {
             appDiv.innerHTML = `<div class="app-icon" id="${data.iconId}"></div><div class="app-name" id="${data.nameId}">${data.name}</div>`;
             addDragListeners(appDiv);
             
-            // App 1: WeChat
-            if (data.id === 'app-0') {
-                appDiv.addEventListener('click', (e) => {
-                    if (!isDragging) openWechat();
-                });
-            }
-            // App 2: Lovers Space (New)
-            if (data.id === 'app-1') {
-                appDiv.addEventListener('click', (e) => {
-                    if (!isDragging) openLoversSpace();
-                });
-            }
+            // App 点击事件 (受编辑模式控制)
+            appDiv.addEventListener('click', (e) => {
+                if (isHomeEditMode || isDragging) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+                if (data.id === 'app-0') openWechat();
+                if (data.id === 'app-1') openLoversSpace();
+            });
             
             cells[index].appendChild(appDiv);
         }
@@ -846,6 +876,54 @@ function addDragListeners(el) {
     el.addEventListener('mousedown', handleDragStart);
 }
 
+// --- 桌面编辑模式逻辑 (Home Screen Edit Mode) ---
+function enterHomeEditMode() {
+    isHomeEditMode = true;
+    document.body.classList.add('edit-mode-active');
+    document.getElementById('home-edit-bar').style.display = 'flex';
+    
+    // 备份当前布局和位置，以便取消时恢复
+    backupGridLayout = getCurrentGridLayout();
+    backupWidgetPosition = { ...lsState.widgetData.position };
+    
+    if (navigator.vibrate) navigator.vibrate(50);
+}
+
+function saveHomeEdit() {
+    isHomeEditMode = false;
+    document.body.classList.remove('edit-mode-active');
+    document.getElementById('home-edit-bar').style.display = 'none';
+    
+    // 保存网格布局
+    saveGridLayout();
+    // 小组件位置在拖拽结束时已更新到 lsState，这里统一保存
+    lsSaveData();
+}
+
+function cancelHomeEdit() {
+    isHomeEditMode = false;
+    document.body.classList.remove('edit-mode-active');
+    document.getElementById('home-edit-bar').style.display = 'none';
+    
+    // 恢复网格布局
+    restoreGridLayout(backupGridLayout);
+    
+    // 恢复小组件位置
+    lsState.widgetData.position = backupWidgetPosition;
+    lsRenderWidget();
+}
+
+function getCurrentGridLayout() {
+    const grid = document.getElementById('homeGrid');
+    const cells = grid.querySelectorAll('.grid-cell');
+    const layout = {};
+    cells.forEach(cell => {
+        const app = cell.querySelector('.app-item');
+        if (app) layout[cell.dataset.index] = app.id;
+    });
+    return layout;
+}
+
 function handleDragStart(e) {
     if (e.target.closest('.settings-modal')) return;
     const touch = e.touches ? e.touches[0] : e;
@@ -853,7 +931,13 @@ function handleDragStart(e) {
     dragStartY = touch.clientY;
     const targetApp = e.currentTarget;
 
-    longPressTimer = setTimeout(() => {
+    if (!isHomeEditMode) {
+        // 非编辑模式下，长按进入编辑模式
+        longPressTimer = setTimeout(() => {
+            enterHomeEditMode();
+        }, 500);
+    } else {
+        // 编辑模式下，按下即开始拖拽
         isDragging = true;
         dragItem = targetApp;
         dragGhost = targetApp.cloneNode(true);
@@ -862,33 +946,40 @@ function handleDragStart(e) {
         updateGhostPosition(touch.clientX, touch.clientY);
         targetApp.classList.add('dragging');
         if (navigator.vibrate) navigator.vibrate(50);
-    }, 500);
+    }
 }
 
 function handleDragMove(e) {
-    if (!longPressTimer) return;
     const touch = e.touches ? e.touches[0] : e;
-    if (!isDragging) {
+    
+    if (!isHomeEditMode && !isDragging) {
+        // 如果还没进入编辑模式，且移动距离过大，取消长按判定
         const moveX = Math.abs(touch.clientX - dragStartX);
         const moveY = Math.abs(touch.clientY - dragStartY);
         if (moveX > 10 || moveY > 10) {
-            clearTimeout(longPressTimer);
-            longPressTimer = null;
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
         }
-    } else {
+    } else if (isDragging) {
         e.preventDefault();
         updateGhostPosition(touch.clientX, touch.clientY);
     }
 }
 
 function handleDragEnd(e) {
-    clearTimeout(longPressTimer);
-    longPressTimer = null;
+    if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+    }
+    
     if (isDragging && dragItem) {
         const touch = e.changedTouches ? e.changedTouches[0] : e;
         dragGhost.style.display = 'none';
         const elemBelow = document.elementFromPoint(touch.clientX, touch.clientY);
         const targetCell = elemBelow ? elemBelow.closest('.grid-cell') : null;
+        
         if (targetCell && !targetCell.classList.contains('widget-item')) {
             const existingApp = targetCell.querySelector('.app-item');
             const originalCell = dragItem.parentElement;
@@ -898,13 +989,16 @@ function handleDragEnd(e) {
             } else {
                 targetCell.appendChild(dragItem);
             }
+            // 注意：这里不再立即保存，而是等点击“完成”时统一保存
         }
+        
         dragItem.classList.remove('dragging');
         if (dragGhost) dragGhost.remove();
         dragGhost = null;
         dragItem = null;
         setTimeout(() => { isDragging = false; }, 50);
     }
+    
     document.removeEventListener('mousemove', handleDragMove);
     document.removeEventListener('mouseup', handleDragEnd);
 }
@@ -1815,9 +1909,13 @@ function wcSwitchTab(tabId) {
     
     document.getElementById('wc-view-chat-detail').classList.remove('active');
     document.getElementById('wc-view-memory').classList.remove('active');
-    document.getElementById('wc-main-tabbar').style.display = 'flex';
-    document.getElementById('wc-btn-back').style.display = 'none';
-    document.getElementById('wc-btn-exit').style.display = 'flex';
+    document.getElementById('wc-main-tabbar').style.display = 'none';
+    
+    // 核心修复：强制控制按钮显示
+    const btnBack = document.getElementById('wc-btn-back');
+    const btnExit = document.getElementById('wc-btn-exit');
+    if (btnBack) btnBack.style.display = 'none';
+    if (btnExit) btnExit.style.display = 'flex'; // 确保显示退出键
 
     const titleMap = { 'chat': 'Chat', 'contacts': 'Contacts', 'moments': 'Moments', 'user': 'User' };
     document.getElementById('wc-nav-title').innerText = titleMap[tabId];
@@ -1826,6 +1924,7 @@ function wcSwitchTab(tabId) {
     rightContainer.innerHTML = '';
 
     if (tabId === 'chat') {
+        document.getElementById('wc-main-tabbar').style.display = 'flex';
         const btn = document.createElement('button');
         btn.className = 'wc-nav-btn';
         btn.innerHTML = '<svg class="wc-icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
@@ -1833,11 +1932,14 @@ function wcSwitchTab(tabId) {
         rightContainer.appendChild(btn);
         wcRenderChats(); 
     } else if (tabId === 'moments') {
+        document.getElementById('wc-main-tabbar').style.display = 'flex';
         const btn = document.createElement('button');
         btn.className = 'wc-nav-btn';
         btn.innerHTML = '<svg class="wc-icon" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>';
         btn.onclick = () => wcOpenModal('wc-modal-post-moment');
         rightContainer.appendChild(btn);
+    } else if (tabId === 'contacts' || tabId === 'user') {
+        document.getElementById('wc-main-tabbar').style.display = 'flex';
     }
 }
 
@@ -2172,6 +2274,9 @@ function wcHandleEdit() {
 
 function wcHandleDelete() {
     if (confirm("确定删除这条消息吗？")) {
+        // 同步删除恋人空间日志
+        lsRemoveFeedByMsgId(wcState.selectedMsgId);
+        
         wcState.chats[wcState.activeChatId] = wcState.chats[wcState.activeChatId].filter(m => m.id !== wcState.selectedMsgId);
         wcSaveData();
         wcRenderMessages(wcState.activeChatId);
@@ -2200,6 +2305,9 @@ function wcToggleMultiSelectMsg(msgId) {
 function wcHandleMultiDeleteAction() {
     if (wcState.multiSelectedIds.length === 0) return;
     if (confirm(`确定删除选中的 ${wcState.multiSelectedIds.length} 条消息吗？`)) {
+        // 同步删除恋人空间日志
+        wcState.multiSelectedIds.forEach(id => lsRemoveFeedByMsgId(id));
+        
         wcState.chats[wcState.activeChatId] = wcState.chats[wcState.activeChatId].filter(m => !wcState.multiSelectedIds.includes(m.id));
         wcSaveData();
         wcExitMultiSelectMode();
@@ -2283,7 +2391,7 @@ async function wcTriggerAI(charIdOverride = null) {
         // --- 强化：对话格式与碎片化 ---
         systemPrompt += `【强制输出规则】
 1. **绝对禁止长文本**：必须将回复拆分成多个短句。
-2. **强制换行**：每说完一句话，必须换行。每一行都会变成一个独立的气泡。
+2. **强制换行**：每说完一句话，必须换行。每一行都会变成一个独立的气泡。绝对不要把多句话写在同一行！
 3. **口语化**：像真人一样打字，不要用书面语。
 4. **表情包格式**：发送表情包时，必须严格使用 [表情包:描述] 格式，不要加任何前后缀。
    - 正确：[表情包:开心]
@@ -2451,8 +2559,8 @@ async function wcTriggerAI(charIdOverride = null) {
 
     } catch (error) {
         console.error("API 请求失败:", error);
-        // 关键修改：标记错误消息
-        wcAddMessage(charId, 'system', 'system', `API 请求失败: ${error.message}`, { style: 'transparent', isError: true });
+        // 关键修改：标记错误消息，且使用 system 类型，防止同步到恋人空间
+        wcAddMessage(charId, 'system', 'system', `[API Error] ${error.message}`, { style: 'transparent', isError: true });
     } finally {
         if (!charIdOverride) titleEl.innerText = originalTitle;
     }
@@ -2478,14 +2586,14 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
 
     if (remainingText.includes('[收款]')) {
         actions.push({ type: 'transfer_action', status: 'received' });
-        remainingText = remainingText.replace(/\[收款\]/g, '');
+        remainingText = remainingText.replace(/$$收款$$/g, '');
     }
     if (remainingText.includes('[退款]')) {
         actions.push({ type: 'transfer_action', status: 'rejected' });
-        remainingText = remainingText.replace(/\[退款\]/g, '');
+        remainingText = remainingText.replace(/$$退款$$/g, '');
     }
 
-    const transferRegex = /\[转账:([\d.]+):(.*?)\]/g;
+    const transferRegex = /$$转账:([\d.]+):(.*?)$$/g;
     let match;
     while ((match = transferRegex.exec(remainingText)) !== null) {
         const amount = parseFloat(match[1]).toFixed(2);
@@ -2496,13 +2604,13 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
     }
     remainingText = remainingText.replace(transferRegex, '');
 
-    const voiceRegex = /\[语音\](.*?)\[\/语音\]/g;
+    const voiceRegex = /$$语音$$(.*?)$$\/语音$$/g;
     while ((match = voiceRegex.exec(remainingText)) !== null) {
         actions.push({ type: 'voice', content: match[1].trim() });
     }
     remainingText = remainingText.replace(voiceRegex, '');
 
-    const momentRegex = /\[动态:(.*?):(.*?)]/g;
+    const momentRegex = /$$动态:(.*?):(.*?)]/g;
     while ((match = momentRegex.exec(remainingText)) !== null) {
         wcAIHandleMomentPost(charId, match[1], match[2]);
     }
@@ -2520,13 +2628,13 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
     }
     remainingText = remainingText.replace(replyRegex, '');
 
-    const likeRegex = /\[点赞:(\d+)\]/g;
+    const likeRegex = /\[点赞:(\d+)$$/g;
     while ((match = likeRegex.exec(remainingText)) !== null) {
         wcAIHandleLike(charId, match[1]);
     }
     remainingText = remainingText.replace(likeRegex, '');
 
-    const quoteRegex = /\[引用:(.*?)\](.*)/;
+    const quoteRegex = /$$引用:(.*?)$$(.*)/;
     const quoteMatch = remainingText.match(quoteRegex);
     let quoteContent = null;
     if (quoteMatch) {
@@ -2534,7 +2642,7 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
         remainingText = quoteMatch[2]; 
     }
     
-    const widgetRegex = /\[小组件:(照片|便利贴):(.*?)]/g;
+    const widgetRegex = /$$小组件:(照片|便利贴):(.*?)]/g;
     while ((match = widgetRegex.exec(remainingText)) !== null) {
         const type = match[1];
         const content = match[2];
@@ -2554,14 +2662,13 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
     }
     remainingText = remainingText.replace(widgetRegex, '');
 
-    // 关键修改：兼容中英文冒号，并按换行符强制分割
-    const parts = remainingText.split(/(\[表情包[:：].*?\])/g);
+    // 关键修改：兼容中英文冒号，并按换行符强制分割，防止AI把多句话挤在一个气泡
+    const parts = remainingText.split(/(\[表情包[:：].*?$$)/g);
     
     parts.forEach(part => {
         if (!part.trim()) return;
         
-        // 兼容中英文冒号
-        const stickerMatch = part.match(/^\[表情包[:：](.*?)\]$/);
+        const stickerMatch = part.match(/^$$表情包[:：](.*?)$$$/);
         if (stickerMatch) {
             const desc = stickerMatch[1].trim();
             const url = wcFindStickerUrlMulti(stickerGroupIds, desc);
@@ -2571,8 +2678,9 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
                 actions.push({ type: 'text', content: `*(发送了一个表情: ${desc})*` });
             }
         } else {
-            // 强制按换行符分割，实现碎片化气泡
-            const lines = part.split('\n');
+            // 强制按标点符号换行（防止AI不听话挤在一起）
+            let textPart = part.replace(/([。！？!?])\s*(?=[^\n])/g, "\$1\n");
+            const lines = textPart.split('\n');
             lines.forEach(line => {
                 if (line.trim()) {
                     actions.push({ type: 'text', content: line.trim() });
@@ -2749,10 +2857,12 @@ function wcAddMessage(charId, sender, type, content, extra = {}) {
         }
     }
 
-    if (lsState.isLinked && lsState.boundCharId && sender === 'me' && charId !== lsState.boundCharId && type !== 'system') {
+    // 关键修复：如果消息是错误信息 (isError) 或系统消息 (system)，则不同步到恋人空间
+    // 传递 msg.id 给 lsAddFeed，以便后续删除
+    if (lsState.isLinked && lsState.boundCharId && sender === 'me' && charId !== lsState.boundCharId && type !== 'system' && !extra.isError) {
         const targetChar = wcState.characters.find(c => c.id === charId);
         if (targetChar) {
-            lsAddFeed(`你给 ${targetChar.name} 发送了消息: "${content}"`);
+            lsAddFeed(`你给 ${targetChar.name} 发送了消息: "${content}"`, null, msg.id);
             
             wcAddMessage(lsState.boundCharId, 'system', 'system', 
                 `[系统提示: 你的恋人(User)刚刚给 ${targetChar.name} 发送了一条消息: "${content}"。请注意，你们开启了账号关联，你能感知到这一切。]`, 
@@ -2761,10 +2871,11 @@ function wcAddMessage(charId, sender, type, content, extra = {}) {
         }
     }
     
-    if (lsState.isLinked && lsState.boundCharId && sender === 'them' && charId !== lsState.boundCharId && type !== 'system') {
+    // 关键修复：如果消息是错误信息 (isError) 或系统消息 (system)，则不同步到恋人空间
+    if (lsState.isLinked && lsState.boundCharId && sender === 'them' && charId !== lsState.boundCharId && type !== 'system' && !extra.isError) {
         const targetChar = wcState.characters.find(c => c.id === charId);
         if (targetChar) {
-            lsAddFeed(`${targetChar.name} 给你发送了消息: "${content}"`, targetChar.avatar);
+            lsAddFeed(`${targetChar.name} 给你发送了消息: "${content}"`, targetChar.avatar, msg.id);
             
             wcAddMessage(lsState.boundCharId, 'system', 'system', 
                 `[系统提示: ${targetChar.name} 刚刚给你的恋人(User)发送了一条消息: "${content}"。请注意，你们开启了账号关联，你能感知到这一切。]`, 
@@ -3144,8 +3255,14 @@ function wcActionRoll() {
     }
 
     if (lastMeIndex !== -1) {
+        // 核心修复：重 Roll 时，同步删除恋人空间中被移除的消息
+        const removedMsgs = msgs.slice(lastMeIndex + 1);
+        removedMsgs.forEach(m => lsRemoveFeedByMsgId(m.id));
+        
         wcState.chats[wcState.activeChatId] = msgs.slice(0, lastMeIndex + 1);
     } else {
+        // 如果没有找到 'me'，说明全是对方发的，全部清空
+        msgs.forEach(m => lsRemoveFeedByMsgId(m.id));
         wcState.chats[wcState.activeChatId] = [];
     }
 
@@ -4061,7 +4178,7 @@ function wcRenderPhoneMe() {
                 <svg class="chevron-right" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
             </div>
             <div class="wc-list-item" style="background: #fff;">
-                <svg class="wc-icon" style="margin-right: 10px; color: #8E8E93;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <svg class="wc-icon" style="margin-right: 10px; color: #8E8E93;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                 <div class="wc-item-content">
                     <div class="wc-item-title">设置</div>
                 </div>
@@ -4676,10 +4793,12 @@ async function wcSimTriggerAI() {
         });
 
         const data = await response.json();
-        const reply = data.choices[0].message.content.trim();
+        let reply = data.choices[0].message.content.trim();
 
         if (!chat.history) chat.history = [];
 
+        // 强制按标点符号换行
+        reply = reply.replace(/([。！？!?])\s*(?=[^\n])/g, "$1\n");
         const lines = reply.split('\n');
         
         wcShowSuccess("回复成功");
@@ -5223,6 +5342,10 @@ function wcSaveChatSettings() {
 
 function wcClearChatHistory() {
       if (confirm("确定清空与该角色的所有聊天记录吗？此操作不可恢复。")) {
+        // 同步删除恋人空间日志
+        const msgs = wcState.chats[wcState.activeChatId] || [];
+        msgs.forEach(m => lsRemoveFeedByMsgId(m.id));
+        
         wcState.chats[wcState.activeChatId] = [];
         wcSaveData();
         wcRenderMessages(wcState.activeChatId);
@@ -5496,7 +5619,8 @@ const lsState = {
         photoDesc: '一张拍立得照片',
         noteText: '今天也要开心哦！',
         currentMode: 'photo',
-        customPhoto: '' // 新增：自定义照片URL
+        customPhoto: '', // 新增：自定义照片URL
+        position: { top: '380px', left: '50%', transform: 'translateX(-50%) rotate(5deg)' } // 新增：位置记忆
     }
 };
 
@@ -5691,6 +5815,9 @@ function lsRenderMain() {
                 <button onclick="document.getElementById('ls-widget-photo-upload').click()" style="width: 100%; padding: 8px; background: #f0f0f0; border: none; border-radius: 8px; font-size: 12px; cursor: pointer;">上传本地照片</button>
                 <input type="file" id="ls-widget-photo-upload" style="display: none;" accept="image/*" onchange="lsHandleWidgetPhotoUpload(this)">
             </div>
+            <div class="ls-setting-item" style="margin-top: 10px;">
+                <button onclick="lsResetWidgetPosition()" style="width: 100%; padding: 12px; background: #e5e5ea; border: none; border-radius: 12px; font-size: 14px; cursor: pointer; color: #007aff; font-weight: 600;">重置小组件位置</button>
+            </div>
         `;
         settingsTab.appendChild(widgetGroup);
     }
@@ -5776,6 +5903,13 @@ function lsHandleWidgetPhotoUpload(input) {
     }
 }
 
+function lsResetWidgetPosition() {
+    lsState.widgetData.position = { top: '380px', left: '50%', transform: 'translateX(-50%) rotate(5deg)' };
+    lsSaveData();
+    lsRenderWidget();
+    alert("小组件位置已重置");
+}
+
 function lsUnbind() {
     if (confirm("确定要解除恋人关系吗？所有记录将被清空。")) {
         lsState.boundCharId = null;
@@ -5797,12 +5931,13 @@ function lsClearFeed() {
 }
 
 // --- Feed & NPC Logic ---
-function lsAddFeed(text, avatar = null) {
+function lsAddFeed(text, avatar = null, msgId = null) {
     const item = {
         id: Date.now(),
         text: text,
         time: Date.now(),
-        avatar: avatar || wcState.user.avatar 
+        avatar: avatar || wcState.user.avatar,
+        msgId: msgId // 关联的聊天消息ID
     };
     lsState.feed.unshift(item);
     if (lsState.feed.length > 50) lsState.feed.pop(); 
@@ -5810,6 +5945,20 @@ function lsAddFeed(text, avatar = null) {
     
     if (document.getElementById('ls-view-main').classList.contains('active')) {
         lsRenderFeed();
+    }
+}
+
+// 新增：根据 msgId 删除日志
+function lsRemoveFeedByMsgId(msgId) {
+    if (!msgId) return;
+    const initialLen = lsState.feed.length;
+    lsState.feed = lsState.feed.filter(item => item.msgId !== msgId);
+    
+    if (lsState.feed.length !== initialLen) {
+        lsSaveData();
+        if (document.getElementById('ls-view-main').classList.contains('active')) {
+            lsRenderFeed();
+        }
     }
 }
 
@@ -5887,6 +6036,9 @@ async function lsTriggerNpcMessage() {
         
         prompt += `请生成一条简短的消息内容。可以是日常问候、邀约、八卦或者工作相关。\n`;
         prompt += `要求：口语化，不要太长，不要带引号。\n`;
+        prompt += `【强制输出规则】：\n`;
+        prompt += `1. 如果要发送多句话，请用换行符分隔。\n`;
+        prompt += `2. 如果要发送表情包，请使用 [表情包:描述] 格式。\n`;
 
         const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
             method: 'POST',
@@ -5920,8 +6072,19 @@ async function lsTriggerNpcMessage() {
         }
         
         if (!chat.history) chat.history = [];
-        chat.history.push({ sender: 'them', content: content });
-        chat.lastMsg = content;
+        
+        // 解析内容，处理换行和表情包
+        const lines = content.split('\n');
+        for (const line of lines) {
+            if (line.trim()) {
+                let msgContent = line.trim();
+                // 简单处理表情包标签，这里不转链接，因为是后台消息，直接存文本即可
+                // 或者可以像 wcParseAIResponse 那样处理，但这里简化为直接存入历史
+                chat.history.push({ sender: 'them', content: msgContent });
+                chat.lastMsg = msgContent;
+            }
+        }
+        
         chat.time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
         
         lsAddFeed(`${npc.name} 给 ${char.name} 发送了消息: "${content}"`, chat.avatar);
@@ -5945,7 +6108,7 @@ async function lsTriggerNpcMessage() {
     }
 }
 
-// --- 桌面小组件渲染与交互 (升级版) ---
+// --- 桌面小组件渲染与交互 (升级版：180x180px + 拖拽记忆) ---
 function lsRenderWidget() {
     let widget = document.getElementById('ls-desktop-widget');
     if (!widget) {
@@ -5954,14 +6117,14 @@ function lsRenderWidget() {
         widget.innerHTML = `
             <div class="ls-widget-inner" id="ls-widget-inner">
                 <div class="ls-widget-front">
-                    <div class="ls-widget-sticker" onclick="lsToggleWidgetMode(event)"></div>
+                    <div class="ls-widget-sticker" onmousedown="lsStartWidgetDrag(event)" ontouchstart="lsStartWidgetDrag(event)"></div>
                     <div class="ls-widget-photo" id="ls-widget-photo" onclick="lsShowWidgetPhotoDesc()">
                         <svg viewBox="0 0 24 24" style="width:50%;height:50%;color:#ccc;"><path fill="currentColor" d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
                     </div>
                     <div class="ls-widget-photo-desc" id="ls-widget-photo-label">Polaroid</div>
                 </div>
                 <div class="ls-widget-back">
-                    <div class="ls-widget-sticker" onclick="lsToggleWidgetMode(event)"></div>
+                    <div class="ls-widget-sticker" onmousedown="lsStartWidgetDrag(event)" ontouchstart="lsStartWidgetDrag(event)"></div>
                     <div class="ls-widget-note-text" id="ls-widget-note-text"></div>
                 </div>
             </div>
@@ -5978,12 +6141,10 @@ function lsRenderWidget() {
             style.innerHTML = `
                 #ls-desktop-widget {
                     position: absolute;
-                    width: 230px; height: 230px; /* 扩大尺寸 */
-                    top: 380px; /* 位置下移 */
-                    left: 50%;
-                    transform: translateX(-50%) rotate(5deg); /* 向右倾斜5度 */
+                    width: 180px; height: 180px; /* 调整为 180x180 */
                     z-index: 10;
                     perspective: 1000px;
+                    /* 初始位置由 JS 控制 */
                 }
                 .ls-widget-inner {
                     position: relative; width: 100%; height: 100%;
@@ -6027,6 +6188,18 @@ function lsRenderWidget() {
         widget.style.display = 'block';
         const data = lsState.widgetData;
         
+        // 恢复位置
+        if (data.position) {
+            widget.style.top = data.position.top;
+            widget.style.left = data.position.left;
+            widget.style.transform = data.position.transform || 'rotate(5deg)';
+        } else {
+            // 默认位置
+            widget.style.top = '380px';
+            widget.style.left = '50%';
+            widget.style.transform = 'translateX(-50%) rotate(5deg)';
+        }
+        
         if (data.currentMode === 'note') {
             widget.classList.add('flipped');
         } else {
@@ -6055,6 +6228,77 @@ function lsRenderWidget() {
     }
 }
 
+// --- 小组件拖拽逻辑 (仅在编辑模式下生效) ---
+function lsStartWidgetDrag(e) {
+    // 如果不是编辑模式，点击胶带直接翻转
+    if (!isHomeEditMode) {
+        lsToggleWidgetMode(e);
+        return;
+    }
+
+    // 编辑模式下，开始拖拽
+    const touch = e.touches ? e.touches[0] : e;
+    lsWidgetDrag.active = true;
+    lsWidgetDrag.startX = touch.clientX;
+    lsWidgetDrag.startY = touch.clientY;
+    
+    const widget = document.getElementById('ls-desktop-widget');
+    const rect = widget.getBoundingClientRect();
+    
+    // 记录初始位置（相对于视口）
+    lsWidgetDrag.initialLeft = rect.left;
+    lsWidgetDrag.initialTop = rect.top;
+    
+    // 切换为绝对定位（如果之前是百分比）
+    widget.style.left = rect.left + 'px';
+    widget.style.top = rect.top + 'px';
+    widget.style.transform = 'rotate(5deg) scale(1.05)'; // 拖拽时稍微放大
+    widget.style.zIndex = 100;
+    
+    if (navigator.vibrate) navigator.vibrate(50);
+    
+    document.addEventListener('mousemove', lsOnWidgetDrag);
+    document.addEventListener('touchmove', lsOnWidgetDrag, { passive: false });
+    document.addEventListener('mouseup', lsEndWidgetDrag);
+    document.addEventListener('touchend', lsEndWidgetDrag);
+}
+
+let lsWidgetDrag = { active: false, startX: 0, startY: 0, initialLeft: 0, initialTop: 0 };
+
+function lsOnWidgetDrag(e) {
+    if (!lsWidgetDrag.active) return;
+    e.preventDefault();
+    
+    const touch = e.touches ? e.touches[0] : e;
+    const dx = touch.clientX - lsWidgetDrag.startX;
+    const dy = touch.clientY - lsWidgetDrag.startY;
+    
+    const widget = document.getElementById('ls-desktop-widget');
+    widget.style.left = (lsWidgetDrag.initialLeft + dx) + 'px';
+    widget.style.top = (lsWidgetDrag.initialTop + dy) + 'px';
+}
+
+function lsEndWidgetDrag(e) {
+    if (lsWidgetDrag.active) {
+        const widget = document.getElementById('ls-desktop-widget');
+        widget.style.transform = 'rotate(5deg)'; // 恢复大小
+        widget.style.zIndex = 10;
+        
+        // 更新内存中的位置，但不立即保存到 DB，等待点击“完成”
+        lsState.widgetData.position = {
+            top: widget.style.top,
+            left: widget.style.left,
+            transform: 'rotate(5deg)'
+        };
+        
+        lsWidgetDrag.active = false;
+        document.removeEventListener('mousemove', lsOnWidgetDrag);
+        document.removeEventListener('touchmove', lsOnWidgetDrag);
+        document.removeEventListener('mouseup', lsEndWidgetDrag);
+        document.removeEventListener('touchend', lsEndWidgetDrag);
+    }
+}
+
 function lsToggleWidgetMode(e) {
     e.stopPropagation();
     const widget = document.getElementById('ls-desktop-widget');
@@ -6069,6 +6313,7 @@ function lsToggleWidgetMode(e) {
 }
 
 function lsShowWidgetPhotoDesc() {
+    if (isHomeEditMode) return; // 编辑模式下禁用点击查看
     if (lsState.widgetData.photoDesc) {
         alert(`【照片画面描述】\n${lsState.widgetData.photoDesc}`);
     } else {
@@ -6210,8 +6455,44 @@ function wcSaveAiMemoryCount() {
     style.innerHTML = `
         .wc-wallet-header { padding-top: 60px !important; }
         #wc-modal-phone-settings { z-index: 20001 !important; }
+        
+        /* 桌面编辑模式样式 */
+        body.edit-mode-active .app-item {
+            animation: shake 0.3s infinite;
+        }
+        body.edit-mode-active .ls-widget-inner {
+            animation: shake 0.3s infinite;
+        }
+        @keyframes shake {
+            0% { transform: rotate(0deg); }
+            25% { transform: rotate(1deg); }
+            50% { transform: rotate(0deg); }
+            75% { transform: rotate(-1deg); }
+            100% { transform: rotate(0deg); }
+        }
+        #home-edit-bar {
+            position: fixed; top: 0; left: 0; width: 100%; height: 60px;
+            background: rgba(255,255,255,0.9); backdrop-filter: blur(10px);
+            z-index: 9999; display: none; justify-content: space-between; align-items: center;
+            padding: 0 20px; box-shadow: 0 1px 5px rgba(0,0,0,0.1);
+        }
+        .edit-btn {
+            padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: 600; cursor: pointer;
+        }
+        .edit-btn.cancel { background: #E5E5EA; color: #000; }
+        .edit-btn.save { background: #007AFF; color: #fff; }
     `;
     document.head.appendChild(style);
+    
+    // 插入编辑栏 HTML
+    const editBar = document.createElement('div');
+    editBar.id = 'home-edit-bar';
+    editBar.innerHTML = `
+        <div class="edit-btn cancel" onclick="cancelHomeEdit()">取消</div>
+        <div style="font-weight:bold;">编辑主屏幕</div>
+        <div class="edit-btn save" onclick="saveHomeEdit()">完成</div>
+    `;
+    document.body.appendChild(editBar);
 
     // 2. 覆盖 applyFont 函数，确保全局字体生效 (包含情侣空间和微信模拟器)
     window.applyFont = function(url) {
