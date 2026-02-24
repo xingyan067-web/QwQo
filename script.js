@@ -1838,12 +1838,21 @@ function wcSwitchTab(tabId) {
 }
 
 function wcHandleBack() {
+    // 如果在回忆页面，先关闭回忆页面
     if (document.getElementById('wc-view-memory').classList.contains('active')) {
         wcCloseMemoryPage();
         return;
     }
+    
+    // 如果在钱包页面，关闭钱包
+    if (document.getElementById('wc-view-wallet').classList.contains('active')) {
+        wcCloseWallet();
+        return;
+    }
+
+    // 正常的聊天页面返回逻辑
     if (document.getElementById('wc-view-chat-detail').classList.contains('active')) {
-        // 退出聊天时，清除所有标记为错误的系统消息
+        // 清除错误消息
         if (wcState.activeChatId && wcState.chats[wcState.activeChatId]) {
             const originalLen = wcState.chats[wcState.activeChatId].length;
             wcState.chats[wcState.activeChatId] = wcState.chats[wcState.activeChatId].filter(m => !m.isError);
@@ -1854,8 +1863,13 @@ function wcHandleBack() {
 
         document.getElementById('wc-view-chat-detail').classList.remove('active');
         document.getElementById('wc-main-tabbar').style.display = 'flex';
-        document.getElementById('wc-btn-back').style.display = 'none';
-        document.getElementById('wc-btn-exit').style.display = 'flex';
+        
+        // 核心修复：恢复按钮状态
+        const btnBack = document.getElementById('wc-btn-back');
+        const btnExit = document.getElementById('wc-btn-exit');
+        if (btnBack) btnBack.style.display = 'none';
+        if (btnExit) btnExit.style.display = 'flex';
+
         document.getElementById('wc-nav-title').innerText = 'Chat';
         
         const rightContainer = document.getElementById('wc-nav-right-container');
@@ -1880,7 +1894,7 @@ function wcHandleBack() {
 // --- WeChat Chat Logic ---
 function wcOpenChat(charId) {
     wcState.activeChatId = charId;
-    sessionApiCallCount = 0; // 重置会话API计数（可选，视需求而定，这里暂不重置，保持全局限制）
+    sessionApiCallCount = 0; 
     
     if (wcState.unreadCounts[charId]) {
         wcState.unreadCounts[charId] = 0;
@@ -1892,8 +1906,12 @@ function wcOpenChat(charId) {
 
     document.getElementById('wc-view-chat-detail').classList.add('active');
     document.getElementById('wc-main-tabbar').style.display = 'none';
-    document.getElementById('wc-btn-back').style.display = 'flex';
-    document.getElementById('wc-btn-exit').style.display = 'none';
+    
+    // 核心修复：强制控制按钮显示
+    const btnBack = document.getElementById('wc-btn-back');
+    const btnExit = document.getElementById('wc-btn-exit');
+    if (btnBack) btnBack.style.display = 'flex';
+    if (btnExit) btnExit.style.display = 'none'; // 确保隐藏退出键
     
     document.getElementById('wc-nav-title').innerText = char.note || char.name;
     
@@ -6052,6 +6070,131 @@ function lsShowWidgetPhotoDesc() {
     } else {
         alert("暂无照片描述");
     }
+}
+
+// ==========================================
+// 缺失的回忆功能补丁 (Fix for Uncaught ReferenceError)
+// ==========================================
+
+// 1. 手动触发总结生成
+async function wcGenerateSummary() {
+    const charId = wcState.activeChatId;
+    const char = wcState.characters.find(c => c.id === charId);
+    if (!char) return;
+
+    const startIdx = parseInt(document.getElementById('wc-mem-start-idx').value);
+    const endIdx = parseInt(document.getElementById('wc-mem-end-idx').value);
+    const msgs = wcState.chats[charId] || [];
+
+    // 验证输入
+    if (isNaN(startIdx) || isNaN(endIdx)) return alert("请输入有效的起始和结束层数");
+    if (startIdx < 0 || endIdx >= msgs.length || startIdx > endIdx) return alert("层数范围无效");
+
+    const apiConfig = await idb.get('ios_theme_api_config');
+    if (!apiConfig || !apiConfig.key) return alert("请先配置 API");
+
+    // 获取选中的世界书条目
+    const checkboxes = document.querySelectorAll('#wc-mem-summary-wb-list input[type="checkbox"]:checked');
+    const selectedWbIds = Array.from(checkboxes).map(cb => cb.value);
+
+    const btn = document.getElementById('wc-btn-generate-summary');
+    const originalText = btn.innerText;
+    btn.innerText = "生成中...";
+    btn.disabled = true;
+
+    try {
+        const sliceMsgs = msgs.slice(startIdx, endIdx + 1);
+        
+        let prompt = `请总结以下对话的主要内容，提取关键信息和情感变化，字数控制在300字以内。\n`;
+        
+        if (selectedWbIds.length > 0) {
+            prompt += `\n【参考背景】\n`;
+            selectedWbIds.forEach(id => {
+                const entry = worldbookEntries.find(e => e.id.toString() === id.toString());
+                if (entry) prompt += `- ${entry.title}: ${entry.desc}\n`;
+            });
+        }
+
+        prompt += `\n【对话内容】\n`;
+        sliceMsgs.forEach(m => {
+            const sender = m.sender === 'me' ? '用户' : char.name;
+            let content = m.content;
+            if (m.type !== 'text') content = `[${m.type}]`;
+            prompt += `${sender}: ${content}\n`;
+        });
+
+        const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.key}` },
+            body: JSON.stringify({
+                model: apiConfig.model,
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.5
+            })
+        });
+
+        const data = await response.json();
+        const summary = data.choices[0].message.content;
+
+        if (!char.memories) char.memories = [];
+        char.memories.unshift({
+            id: Date.now(),
+            type: 'summary',
+            content: `[手动总结 ${startIdx}-${endIdx}] ${summary}`,
+            time: Date.now()
+        });
+        
+        wcSaveData();
+        wcCloseModal('wc-modal-memory-summary');
+        wcRenderMemories(); // 刷新列表
+        alert("总结生成成功！");
+
+    } catch (e) {
+        console.error(e);
+        alert("生成失败：" + e.message);
+    } finally {
+        btn.innerText = originalText;
+        btn.disabled = false;
+    }
+}
+
+// 2. 手动添加记忆
+function wcAddManualMemory() {
+    const text = document.getElementById('wc-mem-manual-text').value.trim();
+    if (!text) return alert("请输入记忆内容");
+
+    const char = wcState.characters.find(c => c.id === wcState.activeChatId);
+    if (!char) return;
+
+    if (!char.memories) char.memories = [];
+    
+    char.memories.unshift({
+        id: Date.now(),
+        type: 'manual',
+        content: text,
+        time: Date.now()
+    });
+
+    wcSaveData();
+    document.getElementById('wc-mem-manual-text').value = '';
+    wcCloseModal('wc-modal-memory-add');
+    wcRenderMemories(); // 刷新列表
+}
+
+// 3. 保存 AI 读取条数设置
+function wcSaveAiMemoryCount() {
+    const count = parseInt(document.getElementById('wc-mem-ai-read-count').value);
+    if (isNaN(count) || count < 0) return alert("请输入有效的数字");
+
+    const char = wcState.characters.find(c => c.id === wcState.activeChatId);
+    if (!char) return;
+
+    if (!char.chatConfig) char.chatConfig = {};
+    char.chatConfig.aiMemoryCount = count;
+
+    wcSaveData();
+    wcCloseModal('wc-modal-memory-ai-count');
+    alert(`设置已保存：AI 将读取最新的 ${count} 条记忆。`);
 }
 
 // ==========================================================================
