@@ -5,6 +5,9 @@ let fontPresets = [];
 let wallpaperPresets = [];
 let apiPresets = [];
 
+// API 限制相关
+let sessionApiCallCount = 0; // 当前会话已调用次数
+
 // 世界书数据 (全局共享)
 let worldbookEntries = [];
 let worldbookGroups = [];
@@ -148,7 +151,6 @@ window.onload = async function() {
     });
 
     // 修复：监听键盘弹出，解决 iOS 遮挡问题，确保输入框跟随
-    // 关键修改：不仅设置高度，还设置 top，防止浏览器自动推挤导致的黑边
     if (window.visualViewport) {
         const appRoot = document.getElementById('app-root');
         
@@ -168,7 +170,7 @@ window.onload = async function() {
         };
 
         window.visualViewport.addEventListener('resize', handleResize);
-        window.visualViewport.addEventListener('scroll', handleResize); // iOS 有时触发 scroll 而不是 resize
+        window.visualViewport.addEventListener('scroll', handleResize);
     }
 
     // 监听聊天输入框焦点，主动滚动到底部
@@ -306,6 +308,9 @@ async function loadAllData() {
         if (apiConfig.temp) {
             document.getElementById('tempSlider').value = apiConfig.temp;
             document.getElementById('tempDisplay').innerText = apiConfig.temp;
+        }
+        if (apiConfig.limit) {
+            document.getElementById('apiMaxCallLimit').value = apiConfig.limit;
         }
         if (apiConfig.model) {
              const select = document.getElementById('modelSelect');
@@ -996,7 +1001,6 @@ function renderGroupView() {
         header.className = 'wb-group-header';
         header.innerHTML = `<span class="wb-group-name">${group}</span><span class="wb-group-count">${groupEntries.length}</span>`;
         
-        // 修复：长按编辑分组名称
         let pressTimer;
         const startPress = (e) => {
             pressTimer = setTimeout(() => {
@@ -1082,7 +1086,6 @@ function createEntryElement(entry) {
     swipeBox.appendChild(deleteBtn);
     wrapper.appendChild(swipeBox);
     
-    // 添加滑动逻辑
     addSwipeLogic(swipeBox);
     
     return wrapper;
@@ -1105,7 +1108,7 @@ function addSwipeLogic(element) {
     element.addEventListener('touchend', (e) => {
         const diff = currentX - startX;
         if (diff < -40) {
-            element.style.transform = 'translateX(-80px)'; // 显示删除按钮
+            element.style.transform = 'translateX(-80px)'; 
         } else {
             element.style.transform = 'translateX(0)';
         }
@@ -1113,7 +1116,6 @@ function addSwipeLogic(element) {
         currentX = null;
     });
     
-    // 点击其他地方收起
     document.addEventListener('touchstart', (e) => {
         if (!element.contains(e.target)) {
             element.style.transform = 'translateX(0)';
@@ -1129,7 +1131,6 @@ function openWorldbookEditor(id = null) {
     const keyInput = document.getElementById('wbKeyInput');
     const descInput = document.getElementById('wbDescInput');
 
-    // 刷新分组下拉框
     typeInput.innerHTML = '';
     if (worldbookGroups.length === 0) worldbookGroups = ['Default'];
     worldbookGroups.forEach(g => {
@@ -1138,7 +1139,6 @@ function openWorldbookEditor(id = null) {
         opt.innerText = g;
         typeInput.appendChild(opt);
     });
-    // 添加新建分组选项
     const newOpt = document.createElement('option');
     newOpt.value = '__NEW__';
     newOpt.innerText = '+ 新建分组...';
@@ -1256,7 +1256,8 @@ async function saveApiConfig() {
         baseUrl: document.getElementById('apiBaseUrl').value,
         key: document.getElementById('apiKey').value,
         temp: document.getElementById('tempSlider').value,
-        model: document.getElementById('modelSelect').value
+        model: document.getElementById('modelSelect').value,
+        limit: parseInt(document.getElementById('apiMaxCallLimit').value) || 0
     };
     await idb.set('ios_theme_api_config', config);
     alert("API 配置已保存");
@@ -1311,7 +1312,6 @@ function renderApiPresets() {
     });
 }
 
-// --- 修复：应用 API 预设时同步切换模型 ---
 function applyApiPreset(idx) {
     const p = apiPresets[idx];
     if (p) {
@@ -1320,10 +1320,8 @@ function applyApiPreset(idx) {
         document.getElementById('tempSlider').value = p.temp;
         document.getElementById('tempDisplay').innerText = p.temp;
         
-        // 尝试设置模型
         if (p.model) {
             const select = document.getElementById('modelSelect');
-            // 检查选项是否存在，不存在则添加
             let exists = false;
             for (let i = 0; i < select.options.length; i++) {
                 if (select.options[i].value === p.model) {
@@ -1369,7 +1367,6 @@ function closeModal() {
     document.getElementById('modalOverlay').classList.remove('active');
 }
 
-// --- 修复：保存 API 预设时包含模型 ---
 async function confirmSavePreset() {
     const name = document.getElementById('modalInput').value;
     if (!name) return alert("请输入名称");
@@ -1398,7 +1395,7 @@ async function confirmSavePreset() {
             baseUrl: document.getElementById('apiBaseUrl').value,
             key: document.getElementById('apiKey').value,
             temp: document.getElementById('tempSlider').value,
-            model: document.getElementById('modelSelect').value // 新增：保存模型
+            model: document.getElementById('modelSelect').value 
         });
         renderApiPresets();
     }
@@ -1766,8 +1763,7 @@ async function wcSaveData() {
         for (const char of wcState.characters) {
             if (char && char.id) await wcDb.put('characters', char);
         }
-        for (const mask of
-wcState.masks) await wcDb.put('masks', mask);
+        for (const mask of wcState.masks) await wcDb.put('masks', mask);
         for (const moment of wcState.moments) await wcDb.put('moments', moment);
         for (const charId in wcState.chats) {
             await wcDb.put('chats', { charId: parseInt(charId), messages: wcState.chats[charId] });
@@ -1847,6 +1843,15 @@ function wcHandleBack() {
         return;
     }
     if (document.getElementById('wc-view-chat-detail').classList.contains('active')) {
+        // 退出聊天时，清除所有标记为错误的系统消息
+        if (wcState.activeChatId && wcState.chats[wcState.activeChatId]) {
+            const originalLen = wcState.chats[wcState.activeChatId].length;
+            wcState.chats[wcState.activeChatId] = wcState.chats[wcState.activeChatId].filter(m => !m.isError);
+            if (wcState.chats[wcState.activeChatId].length !== originalLen) {
+                wcSaveData();
+            }
+        }
+
         document.getElementById('wc-view-chat-detail').classList.remove('active');
         document.getElementById('wc-main-tabbar').style.display = 'flex';
         document.getElementById('wc-btn-back').style.display = 'none';
@@ -1875,6 +1880,7 @@ function wcHandleBack() {
 // --- WeChat Chat Logic ---
 function wcOpenChat(charId) {
     wcState.activeChatId = charId;
+    sessionApiCallCount = 0; // 重置会话API计数（可选，视需求而定，这里暂不重置，保持全局限制）
     
     if (wcState.unreadCounts[charId]) {
         wcState.unreadCounts[charId] = 0;
@@ -2228,9 +2234,19 @@ async function wcTriggerAI(charIdOverride = null) {
         return;
     }
 
+    // 检查 API 调用上限
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) {
+        wcAddMessage(charId, 'system', 'system', '⚠️ 已达到API调用上限，请稍后再试或修改设置。', { isError: true });
+        return;
+    }
+
     const titleEl = document.getElementById('wc-nav-title');
     const originalTitle = titleEl.innerText;
     if (!charIdOverride) titleEl.innerText = "对方正在输入...";
+
+    // 增加调用计数
+    sessionApiCallCount++;
 
     try {
         const config = char.chatConfig || {};
@@ -2242,19 +2258,15 @@ async function wcTriggerAI(charIdOverride = null) {
         let systemPrompt = `你正在参与一个沉浸式的微信聊天模拟。严格扮演你的角色，不要破坏沉浸感。\n`;
         systemPrompt += currentTimeInfo;
         
-        systemPrompt += `【强制对话风格 - 必须严格遵守】
-1. **禁止长文本**：绝对不要发送长段落。
-2. **碎片化输出**：将一句话拆分成多个短句，用换行符分隔。
-3. **气泡分离**：每一行内容都会被解析为一个独立的气泡。请频繁换行。
-4. **语气自然**：少用标点，多用空格或直接断句。可以使用单个Emoji或单个词作为单独的一行。
-5. **示例**：
-   错误：你好呀，今天天气真不错，我们要不要出去玩？
-   正确：
-   你好呀
-   今天天气真不错
-   要不要出去玩？
-6. **不完整句**：允许使用不完整的句子、断裂的语句，模拟真实打字时的随意感。
-7. **节奏松弛**：不要一次性把所有信息都发完，分多次发送。
+        // --- 强化：对话格式与碎片化 ---
+        systemPrompt += `【强制输出规则】
+1. **绝对禁止长文本**：必须将回复拆分成多个短句。
+2. **强制换行**：每说完一句话，必须换行。每一行都会变成一个独立的气泡。
+3. **口语化**：像真人一样打字，不要用书面语。
+4. **表情包格式**：发送表情包时，必须严格使用 [表情包:描述] 格式，不要加任何前后缀。
+   - 正确：[表情包:开心]
+   - 错误：我发个表情 [表情包:开心]
+5. **标点符号**：少用句号，多用空格或换行代替。
 \n\n`;
 
         systemPrompt += `【你的角色设定】\n名字：${char.name}\n人设：${char.prompt || '无'}\n\n`;
@@ -2356,6 +2368,9 @@ async function wcTriggerAI(charIdOverride = null) {
         const messages = [{ role: "system", content: systemPrompt }];
         
         recentMsgs.forEach(m => {
+            // 关键修改：跳过错误消息，不让 AI 读取
+            if (m.isError) return;
+
             if (m.type === 'system') {
                 messages.push({
                     role: "system",
@@ -2414,7 +2429,8 @@ async function wcTriggerAI(charIdOverride = null) {
 
     } catch (error) {
         console.error("API 请求失败:", error);
-        wcAddMessage(charId, 'system', 'system', `API 请求失败: ${error.message}`, { style: 'transparent' });
+        // 关键修改：标记错误消息
+        wcAddMessage(charId, 'system', 'system', `API 请求失败: ${error.message}`, { style: 'transparent', isError: true });
     } finally {
         if (!charIdOverride) titleEl.innerText = originalTitle;
     }
@@ -2516,12 +2532,14 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
     }
     remainingText = remainingText.replace(widgetRegex, '');
 
-    const parts = remainingText.split(/(\[表情包:.*?\])/g);
+    // 关键修改：兼容中英文冒号，并按换行符强制分割
+    const parts = remainingText.split(/(\[表情包[:：].*?\])/g);
     
     parts.forEach(part => {
         if (!part.trim()) return;
         
-        const stickerMatch = part.match(/^\[表情包:(.*?)\]$/);
+        // 兼容中英文冒号
+        const stickerMatch = part.match(/^\[表情包[:：](.*?)\]$/);
         if (stickerMatch) {
             const desc = stickerMatch[1].trim();
             const url = wcFindStickerUrlMulti(stickerGroupIds, desc);
@@ -2531,6 +2549,7 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
                 actions.push({ type: 'text', content: `*(发送了一个表情: ${desc})*` });
             }
         } else {
+            // 强制按换行符分割，实现碎片化气泡
             const lines = part.split('\n');
             lines.forEach(line => {
                 if (line.trim()) {
@@ -2848,6 +2867,11 @@ async function wcAutoGenerateSummary(charId, start, end) {
     const apiConfig = await idb.get('ios_theme_api_config');
     
     if (!apiConfig || !apiConfig.key) return;
+
+    // 检查限制
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) return;
+    sessionApiCallCount++;
 
     try {
         let prompt = `请总结以下对话的主要内容，提取关键信息和情感变化，字数控制在200字以内。\n`;
@@ -3900,7 +3924,6 @@ function wcOpenPhoneSettings() {
         document.getElementById(`wc-preview-icon-${id}`).style.display = 'none';
     });
     
-    // 修复：强制提高弹窗层级，确保显示在黑色仿真器之上
     const modal = document.getElementById('wc-modal-phone-settings');
     modal.classList.remove('hidden');
     modal.classList.add('active');
@@ -4016,7 +4039,7 @@ function wcRenderPhoneMe() {
                 <svg class="chevron-right" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
             </div>
             <div class="wc-list-item" style="background: #fff;">
-                <svg class="wc-icon" style="margin-right: 10px; color: #8E8E93;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <svg class="wc-icon" style="margin-right: 10px; color: #8E8E93;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                 <div class="wc-item-content">
                     <div class="wc-item-title">设置</div>
                 </div>
@@ -4081,6 +4104,14 @@ async function wcGenerateCharWallet() {
 
     const apiConfig = await idb.get('ios_theme_api_config');
     if (!apiConfig || !apiConfig.key) return alert("请先配置 API");
+
+    // 检查限制
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) {
+        wcShowError("已达到API调用上限");
+        return;
+    }
+    sessionApiCallCount++;
 
     wcShowLoading("正在生成钱包数据...");
 
@@ -4162,6 +4193,14 @@ async function wcGeneratePhoneSettings(renderOnly = false) {
 
     const apiConfig = await idb.get('ios_theme_api_config');
     if (!apiConfig || !apiConfig.key) return alert("请先配置 API");
+
+    // 检查限制
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) {
+        wcShowError("已达到API调用上限");
+        return;
+    }
+    sessionApiCallCount++;
 
     wcShowLoading("正在生成手机状态...");
 
@@ -4309,6 +4348,14 @@ async function wcGeneratePhoneChats() {
 
     const apiConfig = await idb.get('ios_theme_api_config');
     if (!apiConfig || !apiConfig.key) return alert("请先配置 API");
+
+    // 检查限制
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) {
+        wcShowError("已达到API调用上限");
+        return;
+    }
+    sessionApiCallCount++;
 
     wcShowLoading("正在生成对话数据...");
 
@@ -4532,6 +4579,14 @@ async function wcSimTriggerAI() {
     const apiConfig = await idb.get('ios_theme_api_config');
     if (!apiConfig || !apiConfig.key) return alert("请配置 API");
 
+    // 检查限制
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) {
+        wcShowError("已达到API调用上限");
+        return;
+    }
+    sessionApiCallCount++;
+
     const btn = document.querySelector('#wc-sim-chat-footer button:last-child');
     btn.disabled = true;
 
@@ -4698,6 +4753,14 @@ async function wcGeneratePhoneContacts() {
     const apiConfig = await idb.get('ios_theme_api_config');
     if (!apiConfig || !apiConfig.key) return alert("请先配置 API");
 
+    // 检查限制
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) {
+        wcShowError("已达到API调用上限");
+        return;
+    }
+    sessionApiCallCount++;
+
     wcShowLoading("正在生成通讯录...");
 
     try {
@@ -4852,8 +4915,7 @@ function wcRenderPhoneContacts() {
             ${imgHtml}
             <div class="wc-item-content" style="margin-left:10px;">
                 <div class="wc-item-title">${contact.name}</div>
-                <div class="wc-item-subtitle" style="font-size:12px;
- color:#999;">${contact.type === 'group' ? '[群聊]' : ''} ${contact.desc}</div>
+                <div class="wc-item-subtitle" style="font-size:12px; color:#999;">${contact.type === 'group' ? '[群聊]' : ''} ${contact.desc}</div>
             </div>
         `;
         div.onclick = () => wcShowPhoneContactDetail(contact);
@@ -5138,7 +5200,7 @@ function wcSaveChatSettings() {
 }
 
 function wcClearChatHistory() {
-    if (confirm("确定清空与该角色的所有聊天记录吗？此操作不可恢复。")) {
+      if (confirm("确定清空与该角色的所有聊天记录吗？此操作不可恢复。")) {
         wcState.chats[wcState.activeChatId] = [];
         wcSaveData();
         wcRenderMessages(wcState.activeChatId);
@@ -5672,7 +5734,7 @@ function lsUpdateWidgetFreq(val) {
 }
 
 function lsUpdateWidgetPhoto(url) {
-    if (url === '已选择本地图片') return; // 忽略占位符
+    if (url === '已选择本地图片') return; 
     lsState.widgetData.customPhoto = url;
     lsSaveData();
     lsRenderWidget();
@@ -5956,7 +6018,7 @@ function lsRenderWidget() {
         // 优先使用自定义照片
         if (data.customPhoto) {
             photoContainer.style.backgroundImage = `url('${data.customPhoto}')`;
-            photoContainer.innerHTML = ''; // 清空内部占位符
+            photoContainer.innerHTML = ''; 
         } else {
             photoContainer.style.backgroundImage = 'none';
             if (data.photoDesc) {
@@ -6021,3 +6083,4 @@ function lsShowWidgetPhotoDesc() {
         }
     };
 })();
+
