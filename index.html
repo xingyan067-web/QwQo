@@ -114,7 +114,7 @@
                     <div class="ls-nav-btn"></div>
                 </div>
                 <div class="ls-content center">
-                    <div class="ls-bind-icon">♥</div>
+                    <div class="ls-bind-icon"><svg viewBox="0 0 24 24" fill="currentColor" width="1em" height="1em"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></div>
                     <h2 class="ls-bind-title">开启恋爱记录</h2>
                     <p class="ls-bind-desc">选择一位列表中的角色<br>发送邀请开启专属空间</p>
                     <div class="ls-char-list" id="ls-bind-list">
@@ -150,7 +150,7 @@
                     </div>
                     <div class="ls-couple-avatars">
                         <div class="ls-avatar-circle" id="ls-main-user-avatar"></div>
-                        <div class="ls-heart-beat">♥</div>
+                        <div class="ls-heart-beat"><svg viewBox="0 0 24 24" fill="currentColor" width="1em" height="1em"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></div>
                         <div class="ls-avatar-circle" id="ls-main-char-avatar"></div>
                     </div>
                     <div class="ls-days-counter" onclick="lsEditStartDate()">
@@ -174,7 +174,7 @@
                     <!-- Tab 2: 纪念 (简单展示) -->
                     <div id="ls-tab-album" class="ls-tab-content">
                         <div class="ls-empty-state">
-                            <div class="ls-icon-placeholder">📷</div>
+                            <div class="ls-icon-placeholder"><svg viewBox="0 0 24 24" fill="currentColor" width="1em" height="1em"><circle cx="12" cy="12" r="3.2"/><path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg></div>
                             <p>相册功能开发中</p>
                         </div>
                     </div>
@@ -191,13 +191,60 @@
                             </div>
                         </div>
                         
-                        <div class="ls-setting-group">
-                            <div class="ls-setting-title-row">NPC 消息频率 (分钟)</div>
+                        <!-- 我的桌面小组件设置 -->
+                        <div class="ls-setting-group" id="ls-widget-settings-group">
                             <div class="ls-setting-row">
-                                <input type="range" id="ls-npc-freq" min="0" max="120" step="5" value="30" oninput="lsUpdateNpcFreq(this.value)">
-                                <span id="ls-npc-freq-display">30m</span>
+                                <div class="ls-setting-label">
+                                    <div class="ls-setting-title">我的桌面小组件</div>
+                                    <div class="ls-setting-desc">在主屏幕显示恋人空间小组件</div>
+                                </div>
+                                <input type="checkbox" id="ls-toggle-widget" class="ls-toggle" onchange="lsToggleWidget(this)">
                             </div>
-                            <div class="ls-setting-desc">0 为关闭。开启后后台自动生成 NPC 给对方发消息。</div>
+                            <div id="ls-my-widget-controls" style="display: none; flex-direction: column; gap: 10px; padding: 15px 0; border-bottom: 1px solid #f5f5f5;">
+                                <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 10px; align-items: center;">
+                                    <span style="font-size: 14px; color: #333;">聊天时更新小组件概率 (%)</span>
+                                    <!-- 修改：手动输入频率 -->
+                                    <input type="number" id="ls-widget-freq" class="ios-input" style="width: 60px; text-align: center; border: 1px solid #eee; border-radius: 8px; padding: 5px; font-size: 14px;" value="20" onchange="lsUpdateWidgetFreq(this.value)">
+                                </div>
+                                
+                                <div style="margin-top: 10px; font-size: 14px; color: #333;">小组件照片 (支持本地或URL)</div>
+                                <input type="text" id="ls-widget-photo-url" placeholder="输入图片URL..." value="" onblur="lsUpdateWidgetPhoto(this.value)" style="width: 100%; padding: 10px; border: 1px solid #eee; border-radius: 8px; font-size: 14px; background: #f9f9f9;">
+                                <button class="ls-btn-outline" onclick="document.getElementById('ls-widget-photo-upload').click()" style="width: 100%; margin-top: 5px;">上传本地照片</button>
+                                <input type="file" id="ls-widget-photo-upload" style="display: none;" accept="image/*" onchange="lsHandleWidgetPhotoUpload(this)">
+                                
+                                <button class="ls-btn-outline" onclick="lsResetWidgetPosition()" style="width: 100%; margin-top: 10px; color: #007aff; border-color: #007aff;">重置小组件位置</button>
+                            </div>
+                        </div>
+                        
+                        <!-- 对方桌面小组件控制 -->
+                        <div class="ls-setting-group">
+                            <div class="ls-setting-row">
+                                <div class="ls-setting-label">
+                                    <div class="ls-setting-title">对方桌面小组件</div>
+                                    <div class="ls-setting-desc">在对方手机桌面显示拍立得/便利贴</div>
+                                </div>
+                                <input type="checkbox" id="ls-toggle-char-widget" class="ls-toggle" onchange="lsToggleCharWidget(this)">
+                            </div>
+                            <div id="ls-char-widget-controls" style="display: none; flex-direction: column; gap: 10px; padding: 15px 0; border-bottom: 1px solid #f5f5f5;">
+                                <div style="font-size: 14px; color: #333; margin-bottom: 5px;">发送内容到对方桌面</div>
+                                <select id="ls-char-widget-type" class="ios-select" style="margin-bottom: 10px;" onchange="document.getElementById('ls-char-widget-input').placeholder = this.value === 'photo' ? '描述图片画面...' : '输入便利贴留言...'">
+                                    <option value="photo">拍立得照片 (AI画面)</option>
+                                    <option value="note">便利贴留言</option>
+                                </select>
+                                <textarea id="ls-char-widget-input" class="ios-textarea" style="min-height: 60px;" placeholder="描述图片画面..."></textarea>
+                                <button class="ls-btn-primary" style="width: 100%; margin-top: 5px;" onclick="lsSendToCharWidget()">发送到对方桌面</button>
+                            </div>
+                        </div>
+                        
+                        <!-- NPC 消息频率 -->
+                        <div class="ls-setting-group">
+                            <div class="ls-setting-row">
+                                <div class="ls-setting-label">
+                                    <div class="ls-setting-title">NPC 消息频率 (分钟)</div>
+                                    <div class="ls-setting-desc">0 为关闭。开启后后台自动生成 NPC 给对方发消息。</div>
+                                </div>
+                                <input type="number" id="ls-npc-freq" class="ios-input" style="width: 60px; text-align: center; border: 1px solid #eee; border-radius: 8px; padding: 5px; font-size: 16px;" value="30" onchange="lsUpdateNpcFreq(this.value)">
+                            </div>
                         </div>
 
                         <div class="ls-setting-group">
@@ -217,7 +264,7 @@
                         <svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
                     </div>
                     <div class="ls-tab-item" onclick="lsSwitchTab('settings')">
-                        <svg viewBox="0 0 24 24"><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                        <svg viewBox="0 0 24 24"><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                     </div>
                 </div>
             </div>
@@ -268,9 +315,26 @@
                         </div>
                         <div class="wc-ios-app-item" onclick="wcOpenPhoneApp('settings')">
                             <div class="wc-ios-app-icon" id="wc-icon-settings">
-                                <svg class="wc-icon" viewBox="0 0 24 24" style="color: #8E8E93; width: 32px; height: 32px;"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                                <svg class="wc-icon" viewBox="0 0 24 24" style="color: #8E8E93; width: 32px; height: 32px;"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                             </div>
                             <div class="wc-ios-app-name">Settings</div>
+                        </div>
+                        
+                        <!-- 新增：恋人空间发送的拍立得/便利贴小组件 (180x180) -->
+                        <div id="wc-phone-lovers-widget" class="wc-phone-lovers-widget" style="display: none;" onclick="wcOpenCharWidgetInteractModal()">
+                            <div class="wc-lovers-widget-inner" id="wc-lovers-widget-inner">
+                                <div class="wc-lovers-widget-front">
+                                    <div class="wc-lovers-widget-sticker" onclick="wcToggleLoversWidgetMode(event)"></div>
+                                    <div class="wc-lovers-widget-photo" id="wc-lovers-widget-photo" onclick="wcShowLoversWidgetPhotoDesc(event)">
+                                        <svg viewBox="0 0 24 24" style="width:50%;height:50%;color:#ccc;"><path fill="currentColor" d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                                    </div>
+                                    <div class="wc-lovers-widget-photo-desc" id="wc-lovers-widget-photo-label">Polaroid</div>
+                                </div>
+                                <div class="wc-lovers-widget-back">
+                                    <div class="wc-lovers-widget-sticker" onclick="wcToggleLoversWidgetMode(event)"></div>
+                                    <div class="wc-lovers-widget-note-text" id="wc-lovers-widget-note-text"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -499,6 +563,55 @@
                         <div class="ios-item-content">
                             <span class="ios-item-label">Wi-Fi</span>
                             <div class="ios-item-right">API 配置<svg class="chevron-right" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></div>
+                        </div>
+                    </div>
+                    <!-- 新增隐私与安全 -->
+                    <div class="ios-list-item" onclick="openPrivacySettings()">
+                        <div class="ios-icon-box" style="background:#34c759"><svg viewBox="0 0 24 24" fill="white"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg></div>
+                        <div class="ios-item-content">
+                            <span class="ios-item-label">隐私与安全</span>
+                            <div class="ios-item-right"><svg class="chevron-right" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 隐私与安全 设置页面 -->
+        <div class="settings-modal sub-page" id="privacySettingsModal">
+            <div class="settings-header">
+                <div class="header-left">
+                    <button class="nav-btn" onclick="closePrivacySettings()">
+                        <svg class="back-svg" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                        <span>设置</span>
+                    </button>
+                </div>
+                <div class="header-title">隐私与安全</div>
+                <div class="header-right"></div>
+            </div>
+            <div class="settings-content ios-settings-content">
+                <div class="settings-title" style="margin-top:20px;">运动与健身</div>
+                <div class="ios-list-group">
+                    <div class="ios-list-item">
+                        <div class="ios-item-content">
+                            <span class="ios-item-label">今日步数</span>
+                            <div class="ios-item-right" id="privacyStepCount" style="color: #000;">0 步</div>
+                        </div>
+                    </div>
+                    <div class="ios-list-item">
+                        <div class="ios-item-content">
+                            <span class="ios-item-label">行走路程</span>
+                            <div class="ios-item-right" id="privacyDistance" style="color: #000;">0.00 km</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="settings-title">定位服务</div>
+                <div class="ios-list-group">
+                    <div class="ios-list-item">
+                        <div class="ios-item-content">
+                            <span class="ios-item-label">当前位置</span>
+                            <div class="ios-item-right" id="privacyLocation" style="max-width: 60%; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #8e8e93;">获取中...</div>
                         </div>
                     </div>
                 </div>
@@ -926,7 +1039,7 @@
                                 <svg class="wc-icon" style="color: #C7C7CC; width: 20px;" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>
                             </div>
                             <div class="wc-list-item" onclick="wcOpenWechatSettings()">
-                                <svg class="wc-icon" style="margin-right: 10px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                                <svg class="wc-icon" style="margin-right: 10px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                                 <div class="wc-item-content">
                                     <div class="wc-item-title">设置</div>
                                     <div class="wc-item-subtitle">数据备份与管理</div>
@@ -965,7 +1078,7 @@
                             <div class="wc-nav-right">
                                 <!-- 设置按钮：关联世界书 & 自动总结条数 -->
                                 <button class="wc-nav-btn" onclick="wcOpenMemorySettingsModal()">
-                                    <svg class="wc-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                                    <svg class="wc-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                                 </button>
                                 <!-- 更多操作：手动添加/生成 -->
                                 <button class="wc-nav-btn" onclick="wcOpenModal('wc-modal-memory-actions')">
@@ -1511,7 +1624,7 @@
                             <div class="wc-list-item center-content" onclick="wcToggleStickerDeleteMode(); wcCloseModal('wc-sticker-options-modal');" style="background: white; height: 56px;">
                                 <span style="font-size: 18px; color: #007AFF;" id="wc-btn-sticker-manage-text">管理表情 (删除)</span>
                             </div>
-                            <div class="wc-list-item center-content" onclick="wcOpenModal('wc-import-sticker-modal'); wcCloseModal('wc-sticker-options-modal');" style="background: white; height: 56px;">
+                            <div class="wc-list-item center-content" onclick="document.getElementById('wc-sticker-category-name').value=''; document.getElementById('wc-sticker-import-text').value=''; wcOpenModal('wc-import-sticker-modal'); wcCloseModal('wc-sticker-options-modal');" style="background: white; height: 56px;">
                                 <span style="font-size: 18px; color: #007AFF;">导入表情</span>
                             </div>
                             <div class="wc-list-item center-content" onclick="wcOpenDeleteCategoriesModal(); wcCloseModal('wc-sticker-options-modal');" style="background: white; height: 56px;">
@@ -1562,7 +1675,7 @@
                         </div>
                     </div>
                 </div>
-
+                
                 <!-- Hidden Inputs -->
                 <input type="file" id="wc-file-input-char" accept="image/*" onchange="wcHandleFileSelect(event, 'char')" style="display:none;">
                 <input type="file" id="wc-file-input-edit-char" accept="image/*" onchange="wcHandleFileSelect(event, 'edit-char')" style="display:none;">
@@ -1584,6 +1697,9 @@
                 <input type="file" id="wc-file-input-icon-browser" accept="image/*" onchange="wcHandleFileSelect(event, 'icon-browser')" style="display:none;">
                 <input type="file" id="wc-file-input-icon-cart" accept="image/*" onchange="wcHandleFileSelect(event, 'icon-cart')" style="display:none;">
                 <input type="file" id="wc-file-input-icon-settings" accept="image/*" onchange="wcHandleFileSelect(event, 'icon-settings')" style="display:none;">
+                
+                <!-- 新增：小组件照片上传 -->
+                <input type="file" id="wc-file-input-widget-photo" accept="image/*" onchange="wcHandleCharWidgetPhotoUpload(this)" style="display:none;">
 
                 <style id="wc-custom-css-style"></style>
             </div>
@@ -1646,6 +1762,42 @@
                         <!-- JS 注入好友列表 -->
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- 对方桌面小组件交互弹窗 (移出 WeChat，置于 body 最末尾，确保层级最高) -->
+        <div id="wc-modal-char-widget-interact" class="wc-modal hidden" style="z-index: 15000;">
+            <div class="wc-modal-content" style="border-radius: 16px; padding: 20px; width: 85%; max-width: 320px;">
+                <h3 style="margin-top: 0; text-align: center; font-size: 18px; margin-bottom: 15px;">发送到对方桌面</h3>
+                <div class="wc-segmented-control" style="margin-bottom: 15px;">
+                    <div class="wc-segment-btn active" id="wc-seg-widget-photo" onclick="wcToggleCharWidgetType('photo')">拍立得照片</div>
+                    <div class="wc-segment-btn" id="wc-seg-widget-note" onclick="wcToggleCharWidgetType('note')">便利贴留言</div>
+                </div>
+                
+                <div id="wc-area-widget-photo">
+                    <div class="wc-segmented-control" style="margin-bottom: 10px; background: #f0f0f0;">
+                        <div class="wc-segment-btn active" id="wc-seg-widget-photo-desc" onclick="wcToggleCharWidgetPhotoSource('desc')" style="font-size: 12px; padding: 6px;">文字描述</div>
+                        <div class="wc-segment-btn" id="wc-seg-widget-photo-local" onclick="wcToggleCharWidgetPhotoSource('local')" style="font-size: 12px; padding: 6px;">本地上传</div>
+                    </div>
+                    
+                    <div id="wc-area-widget-photo-desc">
+                        <textarea id="wc-input-widget-photo-desc" class="wc-form-textarea" placeholder="描述图片画面 (AI将生成图片)..." style="height: 80px;"></textarea>
+                    </div>
+                    
+                    <div id="wc-area-widget-photo-local" style="display: none;">
+                        <div class="wc-upload-rect-placeholder" style="width: 100%; height: 120px;" onclick="wcTriggerUpload('widget-photo')">
+                            <img id="wc-preview-char-widget-photo" src="" style="width: 100%; height: 100%; object-fit: cover; display: none;">
+                            <span id="wc-text-char-widget-photo">点击上传照片</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="wc-area-widget-note" style="display: none;">
+                    <textarea id="wc-input-widget-note-text" class="wc-form-textarea" placeholder="输入便利贴留言..." style="height: 80px;"></textarea>
+                </div>
+                
+                <button class="wc-btn-primary" style="background: #FF9A9E; color: white; margin-top: 15px;" onclick="wcSendToCharWidgetFromSim()">发送</button>
+                <button class="wc-btn-primary wc-btn-secondary" onclick="wcCloseModal('wc-modal-char-widget-interact')">取消</button>
             </div>
         </div>
 
