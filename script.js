@@ -2381,22 +2381,56 @@ async function wcTriggerAI(charIdOverride = null) {
     try {
         const config = char.chatConfig || {};
         const now = new Date();
-        const timeString = now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        const date = now.getDate();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        const timeString = `${year}年${month}月${date}日 ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
         const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
-        const currentTimeInfo = `【当前系统时间】\n现实时间：${timeString} ${dayString}\n\n`;
+        const currentTimeInfo = `【当前现实时间】\n${timeString} ${dayString}\n请务必具备时间观念！你的作息、行为必须符合当前的时间点和星期几（例如：半夜不要说刚下课，周末通常不上课/不上班，除非人设特殊规定）。\n\n`;
 
-        let systemPrompt = `你正在参与一个沉浸式的微信聊天模拟。严格扮演你的角色，不要破坏沉浸感。\n`;
+        let systemPrompt = `你正在参与一个沉浸式的微信聊天模拟。你是一个有独立思考能力、有自己生活的真实人类，绝对不要像AI或NPC一样机械回复。\n`;
         systemPrompt += currentTimeInfo;
         
         // --- 强化：对话格式与碎片化 ---
-        systemPrompt += `【强制输出规则】
-1. **绝对禁止长文本**：必须将回复拆分成多个短句。
-2. **强制换行**：每说完一句话，必须换行。每一行都会变成一个独立的气泡。绝对不要把多句话写在同一行！
-3. **口语化**：像真人一样打字，不要用书面语。
-4. **表情包格式**：发送表情包时，必须严格使用 [表情包:描述] 格式，不要加任何前后缀。
-   - 正确：[表情包:开心]
-   - 错误：我发个表情 [表情包:开心]
-5. **标点符号**：少用句号，多用空格或换行代替。
+        systemPrompt += `【核心扮演原则】
+1. **深度代入**：深入挖掘你的人设背景，思考在当前情境下“你”会怎么想、怎么做。要有自己的主见和情绪，不要一味顺从用户。
+2. **关系界定**：除非人设或历史聊天记录中明确说明了你和用户是恋爱关系，否则**绝对不要默认你们在一起了**！保持符合人设的正常社交距离。
+3. **拒绝油腻**：说话要自然、真实。严禁使用霸总、过度撩拨、油腻、做作或过度讨好的言辞。
+4. **生活感**：结合当前的时间、星期几以及你的人设，合理推断你现在正在做什么（比如吃饭、睡觉、工作、娱乐），让聊天充满生活气息。
+5. **思维链**：在回复前，请先在内心思考（Chain of Thought）：对方这句话的潜台词是什么？我现在的状态是什么？我该如何回应才符合我的人设？不要把这些思考过程输出出来，但要让回复体现出思考的深度。
+
+【绝对输出规则-JSON格式(强制)】
+为了确保回复格式正确，你**必须且只能**返回一个标准的JSON数组。
+**严禁**包含任何 Markdown 代码块标记(如 \`\`\`json 或 \`\`\`)。
+**严禁**在JSON数组之外输出任何文本。
+**严禁**输出类似"[发送了一个表情包:xxx]"的纯文本格式。
+**严禁**输出"BAKA","baka"等词汇，除非人设明确要求。
+
+数组中的每个元素代表一条消息、表情包或动作指令。请严格遵守以下结构：
+
+1. **文本消息**
+   {"type":"text", "content":"消息内容"}
+   *注意*：请务必将长回复拆分为多条短消息，模拟真实聊天节奏。**不要把多句话合并在一条消息里**，每条消息尽量简短。
+   *禁止*：content 中绝对不能包含"[发送了一个表情包...]"或"[图片]"这样的描述文本，表情包必须通过独立的 type:"sticker" 发送。
+   *强制*：禁止在一个 content 字段中包含超过一句话。必须将长回复拆分成 JSON 数组中的多个对象。
+
+2. **表情包**
+   {"type":"sticker", "content":"表情包名称"}
+   *注意*：content 必须严格匹配【可用表情包】列表中的名称。
+
+3. **其他指令** (按需使用)
+   {"type":"voice", "content":"语音内容"}
+   {"type":"transfer", "amount":100, "note":"备注"}
+   {"type":"invite", "status":"pending"} (恋人空间邀请)
+
+示例输出：
+[
+  {"type":"text", "content":"刚才去便利店了"},
+  {"type":"text", "content":"买了个冰淇淋"},
+  {"type":"sticker", "content":"开心"}
+]
 \n\n`;
 
         systemPrompt += `【你的角色设定】\n名字：${char.name}\n人设：${char.prompt || '无'}\n\n`;
@@ -2440,7 +2474,7 @@ async function wcTriggerAI(charIdOverride = null) {
         const recentMoments = wcState.moments.slice(0, 5); 
         if (recentMoments.length > 0) {
             systemPrompt += `【朋友圈动态 (Moments) - 这是一个社交网络环境】\n`;
-            systemPrompt += `你可以看到用户(User)和其他人发布的朋友圈。如果用户发了新内容，你可以点赞或评论。\n`;
+            systemPrompt += `你可以看到用户(User)和其他人发布朋友圈。如果用户发了新内容，你可以点赞或评论。\n`;
             recentMoments.forEach(m => {
                 const commentsStr = m.comments ? m.comments.map(c => `${c.name}: ${c.text}`).join(' | ') : '无';
                 const likesStr = m.likes ? m.likes.join(', ') : '无';
@@ -2448,51 +2482,6 @@ async function wcTriggerAI(charIdOverride = null) {
             });
             systemPrompt += `\n`;
         }
-
-        systemPrompt += `【特殊动作指令 - 严格格式协议】
-除了发送普通文本，你可以使用以下标签触发特殊动作。
-警告：必须严格遵守格式，不要在标签外添加多余的解释性文字！
-
-1. 发送语音：[语音]你想说的话[/语音]
-   - 必须使用此格式发送语音消息。
-   - 错误示例：[语音]你好[/语音] (发送了一段语音)
-   - 正确示例：[语音]你好[/语音]
-
-2. 发送转账：[转账:金额:备注] (例如 [转账:50.50:请你喝奶茶])
-
-3. 收取用户的转账：[收款] (当用户刚刚给你发了转账时，你可以输出这个标签来收款)
-
-4. 退还用户的转账：[退款] (拒绝用户的转账)
-
-5. 发布朋友圈：[动态:文本内容:图片描述] (例如 [动态:今天天气真好:蓝天白云的照片])
-
-6. 评论朋友圈：[评论:动态ID:内容] (例如 [评论:1700000000:哈哈真有趣])
-
-7. 回复朋友圈评论：[回复:动态ID:目标人名:内容] (例如 [回复:1700000000:User:谢谢夸奖])
-
-8. 点赞朋友圈：[点赞:动态ID] (例如 [点赞:1700000000])
-
-9. 引用消息：[引用:用户说的话]你的回复 (例如 [引用:今天吃什么]吃火锅吧)
-`;
-        if (availableStickers.length > 0) {
-            systemPrompt += `10. 发送表情包：[表情包:描述]
-   - 警告：描述必须严格匹配【可用表情包】列表中的内容！不要自己编造描述！
-   - 系统会自动将此标签转换为图片。
-   - 列表：${availableStickers.join(', ')}\n`;
-        }
-        
-        let triggerWidget = false;
-        if (lsState.isLinked && lsState.boundCharId === charId && lsState.widgetEnabled) {
-            if (Math.random() * 100 < lsState.widgetUpdateFreq) {
-                triggerWidget = true;
-            }
-        }
-
-        if (triggerWidget) {
-            systemPrompt += `\n【强制动作】你现在必须向用户的桌面小组件发送更新。请在回复的最后包含标签 [小组件:照片:图片画面描述] 或 [小组件:便利贴:你想说的话(30字以内)]。二选一。\n`;
-        }
-
-        systemPrompt += `\n请根据上下文自然地回复。你可以混合使用文本和特殊指令。如果当前聊天氛围适合发朋友圈，或者你想评论对方的朋友圈，请使用相应的指令。`;
 
         let limit = config.contextLimit > 0 ? config.contextLimit : 30;
         const msgs = wcState.chats[charId] || [];
@@ -2584,133 +2573,57 @@ function wcDelay(ms) {
 }
 
 async function wcParseAIResponse(charId, text, stickerGroupIds) {
-    let remainingText = text;
-    const actions = [];
-
-    if (remainingText.includes('[收款]')) {
-        actions.push({ type: 'transfer_action', status: 'received' });
-        remainingText = remainingText.replace(/\[收款\]/g, '');
-    }
-    if (remainingText.includes('[退款]')) {
-        actions.push({ type: 'transfer_action', status: 'rejected' });
-        remainingText = remainingText.replace(/\[退款\]/g, '');
-    }
-
-    const transferRegex = /\[转账:([\d.]+):(.*?)]/g;
-    let match;
-    while ((match = transferRegex.exec(remainingText)) !== null) {
-        const amount = parseFloat(match[1]).toFixed(2);
-        const note = match[2];
-        if (!isNaN(amount)) {
-            actions.push({ type: 'transfer', amount, note });
-        }
-    }
-    remainingText = remainingText.replace(transferRegex, '');
-
-    const voiceRegex = /\[语音\](.*?)\[\/语音\]/g;
-    while ((match = voiceRegex.exec(remainingText)) !== null) {
-        actions.push({ type: 'voice', content: match[1].trim() });
-    }
-    remainingText = remainingText.replace(voiceRegex, '');
-
-    const momentRegex = /\[动态:(.*?):(.*?)]/g;
-    while ((match = momentRegex.exec(remainingText)) !== null) {
-        wcAIHandleMomentPost(charId, match[1], match[2]);
-    }
-    remainingText = remainingText.replace(momentRegex, '');
-
-    const commentRegex = /\[评论:(\d+):(.*?)]/g;
-    while ((match = commentRegex.exec(remainingText)) !== null) {
-        wcAIHandleComment(charId, match[1], match[2]);
-    }
-    remainingText = remainingText.replace(commentRegex, '');
-
-    const replyRegex = /\[回复:(\d+):(.*?):(.*?)]/g;
-    while ((match = replyRegex.exec(remainingText)) !== null) {
-        wcAIHandleReply(charId, match[1], match[2], match[3]);
-    }
-    remainingText = remainingText.replace(replyRegex, '');
-
-    const likeRegex = /\[点赞:(\d+)\]/g;
-    while ((match = likeRegex.exec(remainingText)) !== null) {
-        wcAIHandleLike(charId, match[1]);
-    }
-    remainingText = remainingText.replace(likeRegex, '');
-
-    const quoteRegex = /\[引用:(.*?)\](.*)/;
-    const quoteMatch = remainingText.match(quoteRegex);
-    let quoteContent = null;
-    if (quoteMatch) {
-        quoteContent = quoteMatch[1];
-        remainingText = quoteMatch[2]; 
-    }
+    let actions = [];
     
-    const widgetRegex = /\[小组件:(照片|便利贴):(.*?)]/g;
-    while ((match = widgetRegex.exec(remainingText)) !== null) {
-        const type = match[1];
-        const content = match[2];
-        if (type === '照片') {
-            lsState.widgetData.type = 'photo';
-            lsState.widgetData.photoDesc = content;
-            lsState.widgetData.currentMode = 'photo';
-            lsAddFeed(`向桌面发送了一张照片`);
-        } else {
-            lsState.widgetData.type = 'note';
-            lsState.widgetData.noteText = content;
-            lsState.widgetData.currentMode = 'note';
-            lsAddFeed(`向桌面发送了一张便利贴`);
-        }
-        lsSaveData();
-        lsRenderWidget();
-    }
-    remainingText = remainingText.replace(widgetRegex, '');
-
-    // 关键修改：兼容中英文冒号，并按换行符强制分割，防止AI把多句话挤在一个气泡
-    // MODIFIED: Better regex for spaces
-    const parts = remainingText.split(/(\[\s*表情包\s*[:：].*?\])/g);
-    
-    parts.forEach(part => {
-        if (!part.trim()) return;
+    try {
+        // 1. 尝试清理 Markdown 标记
+        let cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
         
-        // MODIFIED: Better regex match
-        const stickerMatch = part.match(/^\[\s*表情包\s*[:：]\s*(.*?)\s*\]$/);
-        if (stickerMatch) {
-            const desc = stickerMatch[1].trim();
-            const url = wcFindStickerUrlMulti(stickerGroupIds, desc);
-            if (url) {
-                actions.push({ type: 'sticker', url });
-            } else {
-                actions.push({ type: 'text', content: `[表情: ${desc}]` });
-            }
-        } else {
-            // 强制按标点符号换行（防止AI不听话挤在一起）
-            let textPart = part.replace(/([。！？!?])\s*(?=[^\n])/g, "$1\n");
-            const lines = textPart.split('\n');
-            lines.forEach(line => {
-                if (line.trim()) {
-                    actions.push({ type: 'text', content: line.trim() });
-                }
-            });
+        // 2. 尝试提取 JSON 数组部分 (防止 AI 在 JSON 外面废话)
+        const jsonMatch = cleanText.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+            cleanText = jsonMatch[0];
         }
-    });
+
+        // 3. 解析 JSON
+        actions = JSON.parse(cleanText);
+        
+        if (!Array.isArray(actions)) {
+            // 如果解析出来不是数组，可能是单个对象，尝试包裹
+            actions = [actions];
+        }
+
+    } catch (e) {
+        console.error("JSON Parse Error:", e);
+        console.log("Raw Text:", text);
+        // 降级处理：如果 JSON 解析失败，尝试按行分割文本
+        const lines = text.split('\n');
+        actions = lines.map(line => {
+            if(line.trim()) return { type: 'text', content: line.trim() };
+        }).filter(Boolean);
+    }
 
     for (let i = 0; i < actions.length; i++) {
         const action = actions[i];
-        await wcDelay(2000); 
+        await wcDelay(1500 + Math.random() * 1000); // 模拟打字延迟
         
         let extra = {};
-        if (i === 0 && quoteContent) {
-            extra.quote = quoteContent;
-        }
-
-        if (action.type === 'transfer_action') {
-            wcAIHandleTransfer(charId, action.status);
+        
+        if (action.type === 'transfer_action') { // 兼容旧逻辑
+             wcAIHandleTransfer(charId, action.status);
         } else if (action.type === 'transfer') {
             wcAddMessage(charId, 'them', 'transfer', '转账', { amount: action.amount, note: action.note, status: 'pending', ...extra });
         } else if (action.type === 'voice') {
             wcAddMessage(charId, 'them', 'voice', action.content, extra);
         } else if (action.type === 'sticker') {
-            wcAddMessage(charId, 'them', 'sticker', action.url, extra);
+            // 查找表情包 URL
+            const url = wcFindStickerUrlMulti(stickerGroupIds, action.content);
+            if (url) {
+                wcAddMessage(charId, 'them', 'sticker', url, extra);
+            } else {
+                // 找不到表情包，转为文本描述
+                wcAddMessage(charId, 'them', 'text', `[表情: ${action.content}]`, extra);
+            }
         } else if (action.type === 'text') {
             wcAddMessage(charId, 'them', 'text', action.content, extra);
             
@@ -2719,6 +2632,9 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
                     lsConfirmBind(charId);
                 }
             }
+        } else if (action.type === 'invite') {
+             // 处理恋人空间邀请回应
+             // 逻辑待定，目前暂不处理复杂逻辑
         }
         
         wcScrollToBottom();
@@ -4366,7 +4282,17 @@ async function wcGeneratePhoneSettings(renderOnly = false) {
             wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
         }
 
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        const date = now.getDate();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        const timeString = `${year}年${month}月${date}日 ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
+
         let prompt = `你扮演角色：${char.name}。\n人设：${char.prompt}\n${wbInfo}\n`;
+        prompt += `【当前现实时间】：${timeString} ${dayString}\n请务必具备时间观念，生成的行程和应用使用情况必须符合当前的时间点。\n\n`;
         prompt += `【用户(User)设定】：${userPersona}\n`;
         prompt += `【最近聊天记录】：\n${recentMsgs}\n\n`;
         prompt += `请根据角色的人设、生活习惯以及最近的聊天内容，生成该角色当前的手机状态数据。\n`;
@@ -4528,8 +4454,18 @@ async function wcGeneratePhoneChats() {
             wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
         }
 
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        const date = now.getDate();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        const timeString = `${year}年${month}月${date}日 ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
+
         let prompt = `你扮演角色：${char.name}。\n`;
         prompt += `人设：${char.prompt}\n${wbInfo}\n`;
+        prompt += `【当前现实时间】：${timeString} ${dayString}\n请务必具备时间观念，生成的聊天记录必须符合当前的时间点和日常逻辑。\n\n`;
         prompt += `请生成你的微信消息列表。除了和用户(User)的对话外，还需要生成 3-5 个其他对话。\n`;
         prompt += `【重要】：必须基于现有的通讯录好友生成对话，不要凭空捏造新人物。\n`;
         prompt += `【通讯录名单】：${contactNames}\n`;
@@ -4741,10 +4677,29 @@ async function wcSimTriggerAI() {
     wcShowLoading("正在生成...");
 
     try {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        const date = now.getDate();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        const timeString = `${year}年${month}月${date}日 ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
+
+        // 关键修复：明确角色身份，防止 OOC
         let prompt = `你现在扮演角色：${chat.name}。\n`;
-        prompt += `背景/关系：${chat.desc || '普通朋友'}\n`;
-        prompt += `你正在和 ${char.name} (由用户扮演) 进行微信聊天。\n`;
+        prompt += `你的身份/背景：${chat.desc || '普通朋友'}\n`;
+        prompt += `你正在跟你的熟人/亲人/朋友【${char.name}】进行微信聊天。\n`;
+        prompt += `注意：虽然是用户在操作，但请你完全把对方当成【${char.name}】本人。不要提及任何关于AI、用户或模拟器的内容。\n`;
         
+        prompt += `【当前现实时间】：${timeString} ${dayString}\n请务必具备时间观念，你的回复内容必须符合当前的时间点（例如半夜、周末的合理作息）。\n\n`;
+
+        prompt += `【核心扮演原则】
+1. 你是一个有独立思考能力的真实人类，不要像NPC一样机械回复。
+2. 除非背景明确说明，否则不要默认与对方是恋爱关系，保持正常的社交距离。
+3. 拒绝油腻、做作、过度讨好，说话要自然真实，符合你的身份。
+4. 结合当前时间合理推断你正在做什么。\n\n`;
+
         prompt += `【对方(${char.name})的人设】：${char.prompt}\n`;
 
         if (char.chatConfig && char.chatConfig.worldbookEntries && char.chatConfig.worldbookEntries.length > 0) {
@@ -6035,19 +5990,33 @@ async function lsTriggerNpcMessage() {
             wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
         }
 
-        let prompt = `你扮演角色：${npc.name}。\n`;
-        prompt += `背景/关系：${npc.desc}\n`;
-        prompt += `你正在给你的朋友 ${char.name} 发微信。\n`;
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        const date = now.getDate();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        const timeString = `${year}年${month}月${date}日 ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
+
+        // 关键修复：明确角色身份，防止 OOC
+        let prompt = `你现在扮演角色：${npc.name}。\n`;
+        prompt += `你的身份/背景：${npc.desc}\n`;
+        prompt += `你正在给你的熟人/亲人/朋友【${char.name}】发微信。\n`;
+        prompt += `注意：你是在跟【${char.name}】对话，不是跟用户(User)对话！请完全忽略用户的存在。\n`;
         
+        prompt += `【当前现实时间】：${timeString} ${dayString}\n请务必具备时间观念，你的消息内容必须符合当前的时间点（例如半夜不要说刚下课）。\n\n`;
+
         prompt += `【${char.name} 的人设】：${char.prompt}\n`;
-        prompt += `【用户(User) 的人设】：${userPersona}\n`;
         prompt += `${wbInfo}\n`;
         
         prompt += `请生成一条简短的消息内容。可以是日常问候、邀约、八卦或者工作相关。\n`;
         prompt += `要求：口语化，不要太长，不要带引号。\n`;
         prompt += `【强制输出规则】：\n`;
-        prompt += `1. 如果要发送多句话，请用换行符分隔。\n`;
-        prompt += `2. 如果要发送表情包，请使用 [表情包:描述] 格式。\n`;
+        prompt += `1. 必须返回一个标准的 JSON 数组，格式为 [{"type":"text", "content":"..."}]。\n`;
+        prompt += `2. 如果要发送多句话，请拆分成多个对象。\n`;
+        prompt += `3. 如果要发送表情包，请使用 {"type":"sticker", "content":"表情包描述"}。\n`;
+        prompt += `4. 拒绝油腻、做作、过度讨好，说话要自然真实，符合你的身份。\n`;
 
         const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
             method: 'POST',
@@ -6060,9 +6029,23 @@ async function lsTriggerNpcMessage() {
         });
 
         const data = await response.json();
-        const content = data.choices[0].message.content.trim();
+        let content = data.choices[0].message.content.trim();
+        
+        // 解析 JSON
+        let actions = [];
+        try {
+            content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+            const jsonMatch = content.match(/\[[\s\S]*\]/);
+            if (jsonMatch) content = jsonMatch[0];
+            actions = JSON.parse(content);
+            if (!Array.isArray(actions)) actions = [actions];
+        } catch (e) {
+            // 降级处理
+            const lines = content.split('\n');
+            actions = lines.map(l => ({ type: 'text', content: l.trim() })).filter(a => a.content);
+        }
 
-        if (!content) return;
+        if (actions.length === 0) return;
 
         if (!char.phoneData.chats) char.phoneData.chats = [];
         let chat = char.phoneData.chats.find(c => c.name === npc.name);
@@ -6082,30 +6065,32 @@ async function lsTriggerNpcMessage() {
         
         if (!chat.history) chat.history = [];
         
-        // 解析内容，处理换行和表情包
-        const lines = content.split('\n');
-        for (const line of lines) {
-            if (line.trim()) {
-                let msgContent = line.trim();
-                // 简单处理表情包标签，这里不转链接，因为是后台消息，直接存文本即可
-                // 或者可以像 wcParseAIResponse 那样处理，但这里简化为直接存入历史
-                chat.history.push({ sender: 'them', content: msgContent });
-                chat.lastMsg = msgContent;
+        let lastMsgContent = "";
+        
+        for (const action of actions) {
+            let msgContent = action.content;
+            if (action.type === 'sticker') {
+                // 简单处理表情包，后台消息暂不转图，只存描述
+                msgContent = `[表情: ${action.content}]`;
             }
+            
+            chat.history.push({ sender: 'them', content: msgContent });
+            lastMsgContent = msgContent;
         }
         
+        chat.lastMsg = lastMsgContent;
         chat.time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
         
-        lsAddFeed(`${npc.name} 给 ${char.name} 发送了消息: "${content}"`, chat.avatar);
+        lsAddFeed(`${npc.name} 给 ${char.name} 发送了消息: "${lastMsgContent}"`, chat.avatar);
 
         wcAddMessage(char.id, 'system', 'system', 
-            `[系统提示: 你的手机收到了一条来自 "${npc.name}" 的微信消息: "${content}"。]`, 
+            `[系统提示: 你的手机收到了一条来自 "${npc.name}" 的微信消息: "${lastMsgContent}"。]`, 
             { hidden: true }
         );
 
         if (lsState.isLinked) {
             wcAddMessage(char.id, 'system', 'system', 
-                `[系统提示: ${npc.name} 刚刚给 ${char.name} 发送了一条消息: "${content}"。请注意，你们开启了账号关联，你能感知到这一切。]`, 
+                `[系统提示: ${npc.name} 刚刚给 ${char.name} 发送了一条消息: "${lastMsgContent}"。请注意，你们开启了账号关联，你能感知到这一切。]`, 
                 { hidden: true }
             );
         }
