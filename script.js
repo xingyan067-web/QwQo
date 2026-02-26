@@ -2472,10 +2472,19 @@ async function wcTriggerAI(charIdOverride = null) {
         const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
         const currentTimeInfo = `【当前现实时间】\n${timeString} ${dayString}\n请务必具备时间观念！你的作息、行为必须符合当前的时间点和星期几（例如：半夜不要说刚下课，周末通常不上课/不上班，除非人设特殊规定）。\n\n`;
 
+        // ==========================================
+        // 核心修改：强化系统提示词，注入活人运转与碎片化规则
+        // ==========================================
         let systemPrompt = `你正在参与一个沉浸式的微信聊天模拟。你是一个有独立思考能力、有自己生活的真实人类，绝对不要像AI或NPC一样机械回复。\n`;
         systemPrompt += currentTimeInfo;
         
-        // --- 强化：对话格式与碎片化 ---
+        systemPrompt += `【角色活人运转 (核心心理学)】
+> Personality: HEXACO-driven, 动态性格特征，必须包含内心冲突。
+> Filter: 情绪由认知图式(schema-bias)驱动，拒绝纯条件反射式的机械回复。
+> Vitality: +inconsistency(允许前后矛盾) +emoflux(情绪波动) +microreact(微反应) +minddrift(思维发散)。
+> Coherence: 保持身份叙事的一致性。每一次行动都在保护或挑战自我概念。输出必须经过“我是谁”的逻辑过滤。
+> 纯线上互动：这是一个完全虚拟的线上聊天。严禁提出任何关于线下见面、现实世界互动或转为其他非本平台联系方式的建议。\n\n`;
+
         systemPrompt += `【核心扮演原则】
 1. **深度代入**：深入挖掘你的人设背景，思考在当前情境下“你”会怎么想、怎么做。要有自己的主见和情绪，不要一味顺从用户。
 2. **关系界定**：除非人设或历史聊天记录中明确说明了你和用户是恋爱关系，否则**绝对不要默认你们在一起了**！保持符合人设的正常社交距离。
@@ -2489,6 +2498,10 @@ async function wcTriggerAI(charIdOverride = null) {
 **严禁**在JSON数组之外输出任何文本。
 **严禁**输出类似"[发送了一个表情包:xxx]"的纯文本格式。
 **严禁**输出"BAKA","baka"等词汇，除非人设明确要求。
+
+**关键规则：对话节奏与碎片化**
+你需要模拟真人的聊天习惯，**必须**将回复拆分成多条短消息（建议1-4条以内）。
+**严禁**把所有话挤在一个气泡里！**严禁**在一个 content 字段中包含超过一句话。请保持回复长度的随机性和多样性。
 
 数组中的每个元素代表一条消息、表情包或动作指令。请严格遵守以下结构：
 
@@ -2715,6 +2728,33 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
             }
         }
     }
+
+    // ==========================================
+    // 核心修改：代码层面的强制拆分（终极杀招）
+    // 防止 AI 依然把多句话塞进一个气泡里
+    // ==========================================
+    let finalActions = [];
+    actions.forEach(action => {
+        if (action && action.type === 'text' && action.content) {
+            let textContent = action.content;
+            // 如果文本较长且包含多个句子（通过中文句号、叹号、问号、波浪号判断），强制拆分
+            // 匹配标点符号，并保留标点符号在句子末尾
+            let parts = textContent.match(/[^。！？~!?]+[。！？~!?]*/g);
+            
+            if (parts && parts.length > 1) {
+                parts.forEach(p => {
+                    if (p.trim()) {
+                        finalActions.push({ ...action, content: p.trim() });
+                    }
+                });
+            } else {
+                finalActions.push(action);
+            }
+        } else if (action) {
+            finalActions.push(action);
+        }
+    });
+    actions = finalActions;
 
     for (let i = 0; i < actions.length; i++) {
         const action = actions[i];
@@ -4833,7 +4873,7 @@ async function wcSimTriggerAI() {
 
         let prompt = "";
         
-        // --- 核心修复：群聊逻辑 ---
+        // --- 核心修复：群聊逻辑与碎片化 ---
         if (chat.isGroup) {
             prompt += `你正在模拟一个名为【${chat.name}】的微信群聊。\n`;
             prompt += `群聊背景：${chat.desc || '无'}\n`;
@@ -4854,6 +4894,11 @@ async function wcSimTriggerAI() {
         
         prompt += `\n【当前时间】：${timeString}\n`;
         prompt += `【${char.name} 的人设】：${char.prompt}\n`;
+        
+        // 注入活人运转规则
+        prompt += `\n【角色活人运转规则】\n`;
+        prompt += `> 必须像真人一样聊天，拒绝机械回复。\n`;
+        prompt += `> 必须将长回复拆分成多条短消息（1-4条），严禁把所有话挤在一个气泡里！\n`;
         
         // 注入最近聊天记录
         prompt += `\n【最近聊天记录】：\n`;
@@ -4903,6 +4948,22 @@ async function wcSimTriggerAI() {
                 replies = [{ content: content }];
             }
         }
+
+        // 强制拆分气泡逻辑
+        let finalReplies = [];
+        replies.forEach(reply => {
+            if (reply && reply.content) {
+                let parts = reply.content.match(/[^。！？~!?]+[。！？~!?]*/g);
+                if (parts && parts.length > 1) {
+                    parts.forEach(p => {
+                        if (p.trim()) finalReplies.push({ ...reply, content: p.trim() });
+                    });
+                } else {
+                    finalReplies.push(reply);
+                }
+            }
+        });
+        replies = finalReplies;
 
         if (!chat.history) chat.history = [];
 
@@ -6341,6 +6402,11 @@ async function lsTriggerNpcMessage() {
         prompt += `【${char.name} 的人设】：${char.prompt}\n`;
         prompt += `${wbInfo}\n`;
         prompt += `内容要求：口语化，生活化，符合人设。拒绝油腻和AI味。\n`;
+        
+        // 注入活人运转与碎片化规则
+        prompt += `【角色活人运转规则】\n`;
+        prompt += `> 必须像真人一样聊天，拒绝机械回复。\n`;
+        prompt += `> 必须将长回复拆分成多条短消息（1-4条），严禁把所有话挤在一个气泡里！\n`;
 
         const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
             method: 'POST',
@@ -6371,6 +6437,24 @@ async function lsTriggerNpcMessage() {
         } catch (e) {
             console.error("JSON Parse Error", e);
         }
+
+        // 强制拆分气泡逻辑
+        let finalActions = [];
+        actions.forEach(action => {
+            if (action && action.content) {
+                let parts = action.content.match(/[^。！？~!?]+[。！？~!?]*/g);
+                if (parts && parts.length > 1) {
+                    parts.forEach(p => {
+                        if (p.trim()) finalActions.push({ ...action, content: p.trim() });
+                    });
+                } else {
+                    finalActions.push(action);
+                }
+            } else if (action) {
+                finalActions.push(action);
+            }
+        });
+        actions = finalActions;
 
         if (actions.length === 0) return;
 
