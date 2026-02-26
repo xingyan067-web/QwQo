@@ -35,6 +35,7 @@ let isDragging = false;
 // 手机仿真器相关全局变量
 let wcActiveSimChatId = null; // 当前正在查看的模拟对话ID
 let currentPhoneContact = null; // 当前正在查看的通讯录联系人
+let wcFavoritesTab = 'memos'; // 收藏页面当前 Tab: 'memos' 或 'diaries'
 
 // 隐私与安全全局变量
 let privacyStepCount = parseInt(localStorage.getItem('ios_theme_steps')) || 0;
@@ -137,6 +138,8 @@ window.onload = async function() {
     startClock();
     initBattery(); // 初始化电量
     initWeather(); // 初始化天气
+
+    initNewPhoneFeatures(); // 初始化新增的收藏和浏览器功能UI
 
     // 初始化 WeChat DB
     try {
@@ -246,6 +249,73 @@ window.onload = async function() {
         });
     }
 };
+
+// --- 动态注入新增功能的 HTML 结构 ---
+function initNewPhoneFeatures() {
+    // 1. 覆盖浏览器图标的点击事件
+    const browserIcon = document.querySelector('.wc-ios-app-item[onclick="alert(\'Browser App\')"]');
+    if (browserIcon) {
+        browserIcon.setAttribute('onclick', "wcOpenPhoneApp('browser')");
+    }
+
+    const screenBg = document.getElementById('wc-phone-screen-bg');
+    
+    // 2. 注入微信收藏的 HTML
+    if (screenBg && !document.getElementById('wc-phone-app-favorites')) {
+        const favHtml = `
+            <div id="wc-phone-app-favorites" class="wc-phone-app-view" style="display: none;">
+                <div class="wc-phone-sim-navbar" style="background: #F2F2F7; color: #000; border-bottom: 0.5px solid #C6C6C8; justify-content: space-between; padding: 0 10px;">
+                    <div onclick="wcGeneratePhoneFavorites()" style="cursor: pointer; font-size: 14px; color: #007AFF; display: flex; align-items: center; gap: 4px;">
+                        <svg class="wc-icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 1 0 2.13-5.85L2 9"></path></svg>
+                        刷新(偷看)
+                    </div>
+                    <div style="font-weight: 600;">我的收藏</div>
+                    <div onclick="wcClosePhoneFavorites()" style="cursor: pointer; font-size: 14px;">关闭</div>
+                </div>
+                <div id="wc-phone-favorites-content" style="flex: 1; overflow-y: auto; padding: 0; background: #F2F2F7;"></div>
+            </div>
+            
+            <!-- 备忘录详情弹窗 -->
+            <div id="wc-phone-memo-detail" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #FFF; z-index: 300; display: none; flex-direction: column;">
+                <div class="wc-phone-sim-navbar" style="background: #F9F9F9; color: #000; border-bottom: 0.5px solid #C6C6C8; justify-content: space-between; padding: 0 10px;">
+                    <div onclick="document.getElementById('wc-phone-memo-detail').style.display='none'" style="cursor: pointer; font-size: 14px; color: #007AFF;">返回</div>
+                    <div style="font-weight: 600;">备忘录</div>
+                    <div style="width: 30px;"></div>
+                </div>
+                <div id="wc-phone-memo-detail-content" style="flex: 1; overflow-y: auto; padding: 20px; font-size: 16px; line-height: 1.6; white-space: pre-wrap; color: #333;"></div>
+            </div>
+        `;
+        screenBg.insertAdjacentHTML('beforeend', favHtml);
+    }
+
+    // 3. 注入浏览器的 HTML
+    if (screenBg && !document.getElementById('wc-phone-app-browser')) {
+        const browserHtml = `
+            <div id="wc-phone-app-browser" class="wc-phone-app-view" style="display: none;">
+                <div class="wc-phone-sim-navbar" style="background: #F9F9F9; color: #000; border-bottom: 0.5px solid #C6C6C8; justify-content: space-between; padding: 0 10px;">
+                    <div onclick="wcGeneratePhoneBrowser()" style="cursor: pointer; font-size: 14px; color: #007AFF; display: flex; align-items: center; gap: 4px;">
+                        <svg class="wc-icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 1 0 2.13-5.85L2 9"></path></svg>
+                        刷新(偷看)
+                    </div>
+                    <div style="font-weight: 600;">Browser</div>
+                    <div onclick="wcClosePhoneApp()" style="cursor: pointer; font-size: 14px;">关闭</div>
+                </div>
+                <div id="wc-phone-browser-content" style="flex: 1; overflow-y: auto; padding: 0; background: #F2F2F7;"></div>
+            </div>
+
+            <!-- 帖子详情弹窗 -->
+            <div id="wc-phone-post-detail" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #FFF; z-index: 300; display: none; flex-direction: column;">
+                <div class="wc-phone-sim-navbar" style="background: #F9F9F9; color: #000; border-bottom: 0.5px solid #C6C6C8; justify-content: space-between; padding: 0 10px;">
+                    <div onclick="document.getElementById('wc-phone-post-detail').style.display='none'" style="cursor: pointer; font-size: 14px; color: #007AFF;">返回</div>
+                    <div style="font-weight: 600;">帖子详情</div>
+                    <div style="width: 30px;"></div>
+                </div>
+                <div id="wc-phone-post-detail-content" style="flex: 1; overflow-y: auto; padding: 0; background: #F2F2F7;"></div>
+            </div>
+        `;
+        screenBg.insertAdjacentHTML('beforeend', browserHtml);
+    }
+}
 
 // --- 数据加载逻辑 (异步) ---
 async function loadAllData() {
@@ -2473,7 +2543,7 @@ async function wcTriggerAI(charIdOverride = null) {
         const currentTimeInfo = `【当前现实时间】\n${timeString} ${dayString}\n请务必具备时间观念！你的作息、行为必须符合当前的时间点和星期几（例如：半夜不要说刚下课，周末通常不上课/不上班，除非人设特殊规定）。\n\n`;
 
         // ==========================================
-        // 核心修改：强化系统提示词，注入活人运转与碎片化规则
+        // 核心修改：强化系统提示词，注入活人运转与思维链
         // ==========================================
         let systemPrompt = `你正在参与一个沉浸式的微信聊天模拟。你是一个有独立思考能力、有自己生活的真实人类，绝对不要像AI或NPC一样机械回复。\n`;
         systemPrompt += currentTimeInfo;
@@ -2490,31 +2560,31 @@ async function wcTriggerAI(charIdOverride = null) {
 2. **关系界定**：除非人设或历史聊天记录中明确说明了你和用户是恋爱关系，否则**绝对不要默认你们在一起了**！保持符合人设的正常社交距离。
 3. **拒绝油腻**：说话要自然、真实。严禁使用霸总、过度撩拨、油腻、做作或过度讨好的言辞。
 4. **生活感**：结合当前的时间、星期几以及你的人设，合理推断你现在正在做什么（比如吃饭、睡觉、工作、娱乐），让聊天充满生活气息。
-5. **思维链**：在回复前，请先在内心思考（Chain of Thought）：对方这句话的潜台词是什么？我现在的状态是什么？我该如何回应才符合我的人设？不要把这些思考过程输出出来，但要让回复体现出思考的深度。
+
+【思维链与输出格式要求】
+你必须严格遵守 [incipere] 协议。在回复前，请先进入 <thinking> 标签进行深度推演。
+请按以下步骤思考：
+1. 自我意识校验：是否塑造鲜活真实人格？你是否具有自己的聊天习惯/风格？你想如何回应我？
+2. 真实聊天：正常人的注意力是有限的，不会每句话都非得逐句回复。不对已有信息进行重复反问。断点处理：若与上一条消息间隔较久，默认双方只是自然忙碌后重新拿起手机，自然接续话题。
+3. 逻辑检索：结合上下文和当前时间。
+4. 最后确认：整合以上，是否合理自然回复且不偏离人设？输出消息格式是否正确？
 
 【绝对输出规则-JSON格式(强制)】
-为了确保回复格式正确，你**必须且只能**返回一个标准的JSON数组。
-**严禁**包含任何 Markdown 代码块标记(如 \`\`\`json 或 \`\`\`)。
-**严禁**在JSON数组之外输出任何文本。
+为了确保回复格式正确，你**必须且只能**返回一个 <thinking> 标签和一个标准的 JSON 数组。
+**严禁**在 JSON 数组之外输出任何其他文本。
 **严禁**输出类似"[发送了一个表情包:xxx]"的纯文本格式。
-**严禁**输出"BAKA","baka"等词汇，除非人设明确要求。
 
-**关键规则：对话节奏与碎片化**
-你需要模拟真人的聊天习惯，**必须**将回复拆分成多条短消息（建议1-4条以内）。
-**严禁**把所有话挤在一个气泡里！**严禁**在一个 content 字段中包含超过一句话。请保持回复长度的随机性和多样性。
+**关键规则：对话节奏与气泡拆分**
+- 你需要模拟真人的聊天习惯，将回复拆分成多条短消息（建议1-4条以内）。
+- **严禁把所有话挤在一个气泡里！**
+- **严禁把一句完整的话强行断开！**（例如：错误格式 {"content":"他肯定不把你当"}, {"content":"姐姐看。"}；正确格式 {"content":"他肯定不把你当姐姐看。"}）
+- 每个 content 必须是一句或几句语义完整的话。
 
-数组中的每个元素代表一条消息、表情包或动作指令。请严格遵守以下结构：
-
+JSON 数组中的每个元素代表一条消息、表情包或动作指令。请严格遵守以下结构：
 1. **文本消息**
-   {"type":"text", "content":"消息内容"}
-   *注意*：请务必将长回复拆分为多条短消息，模拟真实聊天节奏。**不要把多句话合并在一条消息里**，每条消息尽量简短。
-   *禁止*：content 中绝对不能包含"[发送了一个表情包...]"或"[图片]"这样的描述文本，表情包必须通过独立的 type:"sticker" 发送。
-   *强制*：禁止在一个 content 字段中包含超过一句话。必须将长回复拆分成 JSON 数组中的多个对象。
-
+   {"type":"text", "content":"完整的一句话或一段话。"}
 2. **表情包**
    {"type":"sticker", "content":"表情包名称"}
-   *注意*：content 必须严格匹配【可用表情包】列表中的名称。
-
 3. **其他指令** (按需使用)
    {"type":"voice", "content":"语音内容"}
    {"type":"transfer", "amount":100, "note":"备注"}
@@ -2527,9 +2597,12 @@ async function wcTriggerAI(charIdOverride = null) {
         }
 
         systemPrompt += `\n示例输出：
+<thinking>
+...思考过程...
+</thinking>
 [
-  {"type":"text", "content":"刚才去便利店了"},
-  {"type":"text", "content":"买了个冰淇淋"},
+  {"type":"text", "content":"刚才去便利店了。"},
+  {"type":"text", "content":"买了个冰淇淋，你要吃吗？"},
   {"type":"sticker", "content":"开心"}
 ]
 \n\n`;
@@ -2677,11 +2750,13 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
     let actions = [];
     
     try {
-        // 1. 尝试清理 Markdown 标记
-        let cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        // 1. 移除 thinking 标签
+        let cleanText = text.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
         
-        // 2. 尝试提取 JSON 数组部分 (防止 AI 在 JSON 外面废话)
-        // 查找第一个 [ 和最后一个 ]
+        // 2. 尝试清理 Markdown 标记
+        cleanText = cleanText.replace(/```json/g, '').replace(/```/g, '').trim();
+        
+        // 3. 尝试提取 JSON 数组部分 (防止 AI 在 JSON 外面废话)
         const start = cleanText.indexOf('[');
         const end = cleanText.lastIndexOf(']');
         
@@ -2695,7 +2770,6 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
                 actions = Array.isArray(singleObj) ? singleObj : [singleObj];
             } catch (e2) {
                 // 如果直接解析失败，尝试用正则提取单个 JSON 对象
-                // 这是一个降级方案，防止 AI 输出多个对象但没放在数组里
                 const regex = /\{"type":\s*"[^"]+",\s*"content":\s*"[^"]+"(?:,\s*"[^"]+":\s*[^}]+)?\}/g;
                 const matches = cleanText.match(regex);
                 if (matches) {
@@ -2710,51 +2784,23 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
         console.error("JSON Parse Error:", e);
         console.log("Raw Text:", text);
         
-        // 降级处理：如果 JSON 解析完全失败，且文本看起来不像 JSON 代码
-        // 只有当文本不包含 {"type" 时，才当作普通文本处理
-        // 否则说明是 JSON 格式错误，不应该直接显示
-        if (!text.includes('{"type"')) {
-            const lines = text.split('\n');
+        // 降级处理
+        let cleanText = text.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+        if (!cleanText.includes('{"type"')) {
+            const lines = cleanText.split('\n');
             actions = lines.map(line => {
                 if(line.trim()) return { type: 'text', content: line.trim() };
             }).filter(Boolean);
         } else {
-            // 如果包含 JSON 结构但解析失败，尝试暴力提取 content 内容
-            // 这是一个最后的保险措施
             const contentRegex = /"content":\s*"([^"]+)"/g;
             let match;
-            while ((match = contentRegex.exec(text)) !== null) {
+            while ((match = contentRegex.exec(cleanText)) !== null) {
                 actions.push({ type: 'text', content: match[1] });
             }
         }
     }
 
-    // ==========================================
-    // 核心修改：代码层面的强制拆分（终极杀招）
-    // 防止 AI 依然把多句话塞进一个气泡里
-    // ==========================================
-    let finalActions = [];
-    actions.forEach(action => {
-        if (action && action.type === 'text' && action.content) {
-            let textContent = action.content;
-            // 如果文本较长且包含多个句子（通过中文句号、叹号、问号、波浪号判断），强制拆分
-            // 匹配标点符号，并保留标点符号在句子末尾
-            let parts = textContent.match(/[^。！？~!?]+[。！？~!?]*/g);
-            
-            if (parts && parts.length > 1) {
-                parts.forEach(p => {
-                    if (p.trim()) {
-                        finalActions.push({ ...action, content: p.trim() });
-                    }
-                });
-            } else {
-                finalActions.push(action);
-            }
-        } else if (action) {
-            finalActions.push(action);
-        }
-    });
-    actions = finalActions;
+    // 移除强制拆分逻辑，完全信任 AI 的 JSON 结构，防止一句话被错误切断
 
     for (let i = 0; i < actions.length; i++) {
         const action = actions[i];
@@ -2829,8 +2875,51 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
     }
 }
 
+// ==========================================
+// 核心修复：朋友圈生成逻辑
+// ==========================================
 async function wcTriggerAIMoment(charId) {
     console.log(`Char ${charId} 尝试发布朋友圈...`);
+    const char = wcState.characters.find(c => c.id === charId);
+    if (!char) return;
+
+    const apiConfig = await idb.get('ios_theme_api_config');
+    if (!apiConfig || !apiConfig.key) return;
+
+    try {
+        const now = new Date();
+        const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        
+        let prompt = `你扮演角色：${char.name}。\n人设：${char.prompt}\n`;
+        prompt += `当前时间：${timeString}。\n`;
+        prompt += `请根据你的人设、当前时间以及最近发生的事情，发布一条微信朋友圈。\n`;
+        prompt += `要求返回纯JSON对象，不要Markdown标记，格式如下：\n`;
+        prompt += `{"text": "朋友圈文案内容", "imageDesc": "配图的画面描述(如果没有配图请留空)"}\n`;
+        prompt += `注意：文案要符合日常朋友圈风格，生活化，不要太长。`;
+
+        const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.key}` },
+            body: JSON.stringify({
+                model: apiConfig.model,
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.8
+            })
+        });
+
+        const data = await response.json();
+        let content = data.choices[0].message.content;
+        content = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+        content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+        const momentData = JSON.parse(content);
+
+        if (momentData && momentData.text) {
+            wcAIHandleMomentPost(charId, momentData.text, momentData.imageDesc || null);
+            console.log(`Char ${charId} 成功发布朋友圈`);
+        }
+    } catch (e) {
+        console.error("朋友圈生成失败", e);
+    }
 }
 
 function wcAIHandleMomentPost(charId, text, imageDesc) {
@@ -2960,26 +3049,35 @@ function wcAddMessage(charId, sender, type, content, extra = {}) {
         }
     }
 
-    // 关键修复：只有绑定的恋人才能看到系统提示，其他角色绝对看不到
+    // ==========================================
+    // 核心修复：恋人空间面具隔离逻辑
+    // 只有绑定的恋人才能看到系统提示，且必须是同一个面具（身份）
+    // ==========================================
     if (lsState.isLinked && lsState.boundCharId && type !== 'system' && !extra.isError) {
-        // 如果当前聊天的不是绑定的恋人
         if (charId !== lsState.boundCharId) {
             const targetChar = wcState.characters.find(c => c.id === charId);
-            if (targetChar) {
-                if (sender === 'me') {
-                    lsAddFeed(`你给 ${targetChar.name} 发送了消息: "${content}"`, null, msg.id);
-                    // 仅向绑定的恋人发送系统提示
-                    wcAddMessage(lsState.boundCharId, 'system', 'system', 
-                        `[系统提示: 你的恋人(User)刚刚给 ${targetChar.name} 发送了一条消息: "${content}"。请注意，你们开启了账号关联，你能感知到这一切。]`, 
-                        { hidden: true }
-                    );
-                } else if (sender === 'them') {
-                    lsAddFeed(`${targetChar.name} 给你发送了消息: "${content}"`, targetChar.avatar, msg.id);
-                    // 仅向绑定的恋人发送系统提示
-                    wcAddMessage(lsState.boundCharId, 'system', 'system', 
-                        `[系统提示: ${targetChar.name} 刚刚给你的恋人(User)发送了一条消息: "${content}"。请注意，你们开启了账号关联，你能感知到这一切。]`, 
-                        { hidden: true }
-                    );
+            const boundChar = wcState.characters.find(c => c.id === lsState.boundCharId);
+            
+            if (targetChar && boundChar) {
+                // 获取当前聊天使用的面具头像和绑定恋人使用的面具头像
+                const currentMask = (targetChar.chatConfig && targetChar.chatConfig.userAvatar) ? targetChar.chatConfig.userAvatar : wcState.user.avatar;
+                const boundMask = (boundChar.chatConfig && boundChar.chatConfig.userAvatar) ? boundChar.chatConfig.userAvatar : wcState.user.avatar;
+                
+                // 只有面具相同时，才同步消息到恋人空间
+                if (currentMask === boundMask) {
+                    if (sender === 'me') {
+                        lsAddFeed(`你给 ${targetChar.name} 发送了消息: "${content}"`, null, msg.id);
+                        wcAddMessage(lsState.boundCharId, 'system', 'system', 
+                            `[系统提示: 你的恋人(User)刚刚给 ${targetChar.name} 发送了一条消息: "${content}"。请注意，你们开启了账号关联，你能感知到这一切。]`, 
+                            { hidden: true }
+                        );
+                    } else if (sender === 'them') {
+                        lsAddFeed(`${targetChar.name} 给你发送了消息: "${content}"`, targetChar.avatar, msg.id);
+                        wcAddMessage(lsState.boundCharId, 'system', 'system', 
+                            `[系统提示: ${targetChar.name} 刚刚给你的恋人(User)发送了一条消息: "${content}"。请注意，你们开启了账号关联，你能感知到这一切。]`, 
+                            { hidden: true }
+                        );
+                    }
                 }
             }
         }
@@ -3137,7 +3235,8 @@ async function wcAutoGenerateSummary(charId, start, end) {
         });
 
         const data = await response.json();
-        const summary = data.choices[0].message.content;
+        let summary = data.choices[0].message.content;
+        summary = summary.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
 
         if (!char.memories) char.memories = [];
         char.memories.unshift({
@@ -3355,18 +3454,32 @@ function wcActionRoll() {
         }
     }
 
+    const newMsgs = [];
     if (lastMeIndex !== -1) {
-        // 核心修复：重 Roll 时，同步删除恋人空间中被移除的消息
-        const removedMsgs = msgs.slice(lastMeIndex + 1);
-        removedMsgs.forEach(m => lsRemoveFeedByMsgId(m.id));
-        
-        wcState.chats[wcState.activeChatId] = msgs.slice(0, lastMeIndex + 1);
+        // 保留最后一次用户发言及之前的所有消息
+        for (let i = 0; i <= lastMeIndex; i++) {
+            newMsgs.push(msgs[i]);
+        }
+        // 核心修复：保留用户发言之后的系统消息（NPC消息），只删除AI的回复
+        for (let i = lastMeIndex + 1; i < msgs.length; i++) {
+            if (msgs[i].type === 'system') {
+                newMsgs.push(msgs[i]);
+            } else {
+                lsRemoveFeedByMsgId(msgs[i].id);
+            }
+        }
     } else {
-        // 如果没有找到 'me'，说明全是对方发的，全部清空
-        msgs.forEach(m => lsRemoveFeedByMsgId(m.id));
-        wcState.chats[wcState.activeChatId] = [];
+        // 如果没有用户发言，保留所有系统消息，删除AI回复
+        for (let i = 0; i < msgs.length; i++) {
+            if (msgs[i].type === 'system') {
+                newMsgs.push(msgs[i]);
+            } else {
+                lsRemoveFeedByMsgId(msgs[i].id);
+            }
+        }
     }
 
+    wcState.chats[wcState.activeChatId] = newMsgs;
     wcSaveData();
     wcRenderMessages(wcState.activeChatId);
     wcTriggerAI();
@@ -3410,7 +3523,7 @@ function wcOpenMemoryPage() {
     
     const btnSettings = document.createElement('button');
     btnSettings.className = 'wc-nav-btn';
-    btnSettings.innerHTML = '<svg class="wc-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
+    btnSettings.innerHTML = '<svg class="wc-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2 2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
     btnSettings.onclick = () => wcOpenMemorySettingsModal();
     rightContainer.appendChild(btnSettings);
 
@@ -4148,6 +4261,13 @@ function wcClosePhoneSim() {
     document.getElementById('wc-view-phone-sim').classList.remove('active');
     document.getElementById('wc-phone-app-message').style.display = 'none';
     document.getElementById('wc-phone-app-settings').style.display = 'none';
+    document.getElementById('wc-phone-app-privacy').style.display = 'none';
+    
+    const favApp = document.getElementById('wc-phone-app-favorites');
+    if(favApp) favApp.style.display = 'none';
+    const browserApp = document.getElementById('wc-phone-app-browser');
+    if(browserApp) browserApp.style.display = 'none';
+
     wcStopPhoneClock();
 }
 
@@ -4217,6 +4337,9 @@ function wcOpenPhoneApp(appName) {
     } else if (appName === 'settings') {
         document.getElementById('wc-phone-app-settings').style.display = 'flex';
         wcGeneratePhoneSettings(true); 
+    } else if (appName === 'browser') {
+        document.getElementById('wc-phone-app-browser').style.display = 'flex';
+        wcRenderPhoneBrowserContent();
     }
     document.getElementById('wc-phone-fingerprint-btn').style.display = 'none';
     document.getElementById('wc-phone-sticky-note').style.display = 'none';
@@ -4225,6 +4348,13 @@ function wcOpenPhoneApp(appName) {
 function wcClosePhoneApp() {
     document.getElementById('wc-phone-app-message').style.display = 'none';
     document.getElementById('wc-phone-app-settings').style.display = 'none';
+    document.getElementById('wc-phone-app-privacy').style.display = 'none';
+    
+    const favApp = document.getElementById('wc-phone-app-favorites');
+    if(favApp) favApp.style.display = 'none';
+    const browserApp = document.getElementById('wc-phone-app-browser');
+    if(browserApp) browserApp.style.display = 'none';
+    
     document.getElementById('wc-phone-fingerprint-btn').style.display = 'flex';
     document.getElementById('wc-phone-sticky-note').style.display = 'flex';
 }
@@ -4253,7 +4383,8 @@ function wcSwitchPhoneTab(tab) {
         wcRenderPhoneContacts();
     } else if (tab === 'me') {
         headerTitle.innerText = '我';
-        headerLeft.innerHTML = '';
+        // 核心修改：在左上角增加一键破解按钮
+        headerLeft.innerHTML = `<div onclick="wcGeneratePrivacyAndFavorites()" style="cursor: pointer; display: flex; align-items: center; font-size: 14px; color: #007AFF;"><svg class="wc-icon" viewBox="0 0 24 24" style="width: 16px; height: 16px; margin-right: 4px;"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 1 0 2.13-5.85L2 9"></path></svg>一键破解</div>`;
         wcRenderPhoneMe();
     }
 }
@@ -4266,7 +4397,8 @@ function wcRenderPhoneMe() {
     const profile = char.phoneData && char.phoneData.profile ? char.phoneData.profile : { nickname: char.name, sign: "暂无签名" };
 
     content.innerHTML = `
-        <div style="background: #fff; padding: 30px 20px; display: flex; align-items: center; margin-bottom: 10px;">
+        <div style="background: #fff; padding: 30px 20px; display: flex; align-items: center; margin-bottom: 10px
+;">
             <img src="${char.avatar}" style="width: 64px; height: 64px; border-radius: 8px; margin-right: 16px; object-fit: cover;">
             <div style="flex: 1;">
                 <div style="font-size: 20px; font-weight: 600; margin-bottom: 4px;">${profile.nickname}</div>
@@ -4286,7 +4418,15 @@ function wcRenderPhoneMe() {
         </div>
         
         <div class="wc-list-group" style="margin-top: 10px;">
-            <div class="wc-list-item" style="background: #fff; border-bottom: 0.5px solid #E5E5EA;">
+            <!-- 新增：收藏 -->
+            <div class="wc-list-item" onclick="wcOpenPhoneFavorites()" style="background: #fff; border-bottom: 0.5px solid #E5E5EA;">
+                <svg class="wc-icon" style="margin-right: 10px; color: #FFC107;" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                <div class="wc-item-content">
+                    <div class="wc-item-title">收藏</div>
+                </div>
+                <svg class="chevron-right" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+            </div>
+            <div class="wc-list-item" onclick="wcOpenPhonePrivacy()" style="background: #fff; border-bottom: 0.5px solid #E5E5EA;">
                 <svg class="wc-icon" style="margin-right: 10px; color: #007AFF;" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
                 <div class="wc-item-content">
                     <div class="wc-item-title">隐私</div>
@@ -4302,6 +4442,131 @@ function wcRenderPhoneMe() {
             </div>
         </div>
     `;
+}
+
+// --- Phone Privacy Logic (New) ---
+function wcOpenPhonePrivacy() {
+    document.getElementById('wc-phone-app-privacy').style.display = 'flex';
+    wcRenderPhonePrivacyContent();
+}
+
+function wcClosePhonePrivacy() {
+    document.getElementById('wc-phone-app-privacy').style.display = 'none';
+}
+
+function wcRenderPhonePrivacyContent() {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    const content = document.getElementById('wc-phone-privacy-content');
+    if (!char) return;
+
+    const privacyData = (char.phoneData && char.phoneData.privacy) ? char.phoneData.privacy : null;
+
+    if (!privacyData) {
+        content.innerHTML = '<div style="padding: 40px 20px; text-align: center; color: #8E8E93; font-size: 14px;">点击左上角「刷新」<br>偷偷查看 Ta 的私密记录...</div>';
+        return;
+    }
+
+    content.innerHTML = `
+        <div style="background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.05);">
+            <div style="font-size: 18px; font-weight: 600; margin-bottom: 15px; color: #FF3B30; display: flex; align-items: center; gap: 8px;">
+                <svg class="wc-icon" viewBox="0 0 24 24" style="width: 20px; height: 20px; stroke: currentColor;"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                私密记录
+            </div>
+            <div style="margin-bottom: 12px;">
+                <span style="font-size: 13px; color: #8E8E93;">时间：</span>
+                <span style="font-size: 15px; color: #333;">${privacyData.time}</span>
+            </div>
+            <div style="margin-bottom: 12px;">
+                <span style="font-size: 13px; color: #8E8E93;">状态：</span>
+                <span style="font-size: 15px; color: #333;">${privacyData.status}</span>
+            </div>
+            <div style="margin-bottom: 12px;">
+                <div style="font-size: 13px; color: #8E8E93; margin-bottom: 4px;">动作描述：</div>
+                <div style="font-size: 15px; color: #333; line-height: 1.5; background: #F9F9F9; padding: 10px; border-radius: 8px;">${privacyData.action}</div>
+            </div>
+            <div>
+                <div style="font-size: 13px; color: #8E8E93; margin-bottom: 4px;">内心感受：</div>
+                <div style="font-size: 15px; color: #333; line-height: 1.5; background: #F9F9F9; padding: 10px; border-radius: 8px;">${privacyData.feeling}</div>
+            </div>
+        </div>
+    `;
+}
+
+async function wcGeneratePhonePrivacy() {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    if (!char) return;
+
+    const apiConfig = await idb.get('ios_theme_api_config');
+    if (!apiConfig || !apiConfig.key) return alert("请先配置 API");
+
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) {
+        wcShowError("已达到API调用上限");
+        return;
+    }
+    sessionApiCallCount++;
+
+    wcShowLoading("正在破解私密空间...");
+
+    try {
+        const realMsgs = wcState.chats[char.id] || [];
+        const recentMsgs = realMsgs.slice(-30).map(m => `${m.sender==='me'?'User':char.name}: ${m.content}`).join('\n');
+        const chatConfig = char.chatConfig || {};
+        const userPersona = chatConfig.userPersona || wcState.user.persona || "无";
+
+        let wbInfo = "";
+        if (worldbookEntries.length > 0) {
+            const linkedIds = chatConfig.worldbookEntries || [];
+            const linkedEntries = worldbookEntries.filter(e => linkedIds.includes(e.id.toString()));
+            const entriesToUse = linkedEntries.length > 0 ? linkedEntries : worldbookEntries.slice(0, 10);
+            wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
+        }
+
+        let prompt = `你扮演角色：${char.name}。\n`;
+        prompt += `人设：${char.prompt}\n${wbInfo}\n`;
+        prompt += `【用户(User)设定】：${userPersona}\n`;
+        prompt += `【核心场景设定】：我（User）现在正在偷偷查看你（${char.name}）手机上的私密记录APP。\n`;
+        prompt += `【最近我们的聊天记录（20-30条）】：\n${recentMsgs}\n\n`;
+        
+        prompt += `请基于你的人设、我的设定，以及我们**最近的聊天上下文**，生成你最近一次的【私密自慰记录】。\n`;
+        prompt += `【要求】：\n`;
+        prompt += `1. 内容必须高度贴合最近的聊天内容（例如：如果聊天中我在欺负你，你的记录里可能会充满委屈和渴望；如果我们在暧昧，记录里可能满脑子都是我）。\n`;
+        prompt += `2. 描写要富有沉浸感、细腻、符合角色性格。\n`;
+        prompt += `3. 返回纯 JSON 对象，格式如下：\n`;
+        prompt += `{
+          "time": "昨晚深夜 / 刚刚",
+          "status": "简短的状态概括，如：极度渴望、边哭边弄等",
+          "action": "具体的动作描述，你是如何触碰自己的，用了什么物品，或者看着什么东西（比如我的照片/聊天记录）",
+          "feeling": "详细的内心感受，对User的情感，身体的反应等"
+        }\n`;
+
+        const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.key}` },
+            body: JSON.stringify({
+                model: apiConfig.model,
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.8
+            })
+        });
+
+        const data = await response.json();
+        let content = data.choices[0].message.content;
+        content = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+        content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+        const privacyData = JSON.parse(content);
+
+        if (!char.phoneData) char.phoneData = {};
+        char.phoneData.privacy = privacyData;
+        wcSaveData();
+
+        wcRenderPhonePrivacyContent();
+        wcShowSuccess("破解成功");
+
+    } catch (e) {
+        console.error(e);
+        wcShowError("生成失败");
+    }
 }
 
 function wcOpenPhoneWallet() {
@@ -4418,6 +4683,7 @@ async function wcGenerateCharWallet() {
 
         const data = await response.json();
         let content = data.choices[0].message.content;
+        content = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
         content = content.replace(/```json/g, '').replace(/```/g, '').trim();
         const walletData = JSON.parse(content);
 
@@ -4520,6 +4786,7 @@ async function wcGeneratePhoneSettings(renderOnly = false) {
 
         const data = await response.json();
         let contentStr = data.choices[0].message.content;
+        contentStr = contentStr.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
         contentStr = contentStr.replace(/```json/g, '').replace(/```/g, '').trim();
         const settingsData = JSON.parse(contentStr);
 
@@ -4565,7 +4832,8 @@ function renderSettingsUI(data) {
                 </div>
             `;
         });
-    } else {
+    }
+        else {
         locationsHtml = '<div style="color:#999; text-align:center; padding:10px;">暂无行程记录</div>';
     }
 
@@ -4622,7 +4890,7 @@ async function wcGeneratePhoneChats() {
     }
     sessionApiCallCount++;
 
-    wcShowLoading("正在生成对话数据...");
+    wcShowLoading("正在偷看聊天记录...");
 
     try {
         const realMsgs = wcState.chats[char.id] || [];
@@ -4631,12 +4899,17 @@ async function wcGeneratePhoneChats() {
             content: m.content
         }));
         
+        // 核心修改：提取最近30条聊天记录作为上下文
+        const recentMsgs = realMsgs.slice(-30).map(m => `${m.sender==='me'?'User':char.name}: ${m.content}`).join('\n');
+        
         const contactNames = char.phoneData.contacts
             .filter(c => !c.isUser) 
             .map(c => `${c.name} (${c.desc})`)
             .join(', ');
 
         const chatConfig = char.chatConfig || {};
+        const userPersona = chatConfig.userPersona || wcState.user.persona || "无";
+        
         let wbInfo = "";
         if (worldbookEntries.length > 0) {
             const linkedIds = chatConfig.worldbookEntries || [];
@@ -4654,13 +4927,20 @@ async function wcGeneratePhoneChats() {
         const timeString = `${year}年${month}月${date}日 ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
         const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
 
+        // 核心修改：注入“偷看手机”和“剧情联动”的Prompt
         let prompt = `你扮演角色：${char.name}。\n`;
         prompt += `人设：${char.prompt}\n${wbInfo}\n`;
-        prompt += `【当前现实时间】：${timeString} ${dayString}\n请务必具备时间观念，生成的聊天记录必须符合当前的时间点和日常逻辑。\n\n`;
-        prompt += `请生成你的微信消息列表。除了和用户(User)的对话外，还需要生成 3-5 个其他对话。\n`;
-        prompt += `【重要】：必须基于现有的通讯录好友生成对话，不要凭空捏造新人物。\n`;
+        prompt += `【当前现实时间】：${timeString} ${dayString}\n`;
+        prompt += `【核心场景设定】：我（User，设定：${userPersona}）现在正在偷偷查看你（${char.name}）手机上的微信聊天列表。\n`;
+        prompt += `【最近我们的聊天记录（20-30条）】：\n${recentMsgs}\n\n`;
+        
+        prompt += `请基于你的人设、我的设定，以及我们**最近的聊天上下文**，生成你的微信消息列表（3-5个其他NPC的对话）。\n`;
+        prompt += `【要求】：\n`;
+        prompt += `1. 必须基于现有的通讯录好友生成对话，不要凭空捏造新人物。\n`;
         prompt += `【通讯录名单】：${contactNames}\n`;
-        prompt += `【要求】：对于每个对话，必须生成最近的 3-5 条具体聊天记录(history)。\n`;
+        prompt += `2. NPC的聊天内容必须和我们最近的聊天产生**强烈的剧情联动**（例如：背着我和闺蜜讨论我、暴露对我撒的谎、或者因为我最近的举动而向别人求助/抱怨等）。\n`;
+        prompt += `3. 充满偷看手机时的“背德感”和“信息量”，让我看到你背地里真实的一面。\n`;
+        prompt += `4. 对于每个对话，必须生成最近的 3-5 条具体聊天记录(history)。\n`;
         prompt += `【格式要求】：返回一个纯 JSON 数组，不要 Markdown。格式如下：\n`;
         prompt += `[
   {
@@ -4681,12 +4961,13 @@ async function wcGeneratePhoneChats() {
             body: JSON.stringify({
                 model: apiConfig.model,
                 messages: [{ role: "user", content: prompt }],
-                temperature: 0.7
+                temperature: 0.8
             })
         });
 
         const data = await response.json();
         let content = data.choices[0].message.content;
+        content = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
         content = content.replace(/```json/g, '').replace(/```/g, '').trim();
         const npcChats = JSON.parse(content);
 
@@ -4707,7 +4988,7 @@ async function wcGeneratePhoneChats() {
         wcSaveData();
 
         wcRenderPhoneChats();
-        wcShowSuccess("对话生成成功");
+        wcShowSuccess("破解成功");
 
     } catch (e) {
         console.error(e);
@@ -4899,6 +5180,8 @@ async function wcSimTriggerAI() {
         prompt += `\n【角色活人运转规则】\n`;
         prompt += `> 必须像真人一样聊天，拒绝机械回复。\n`;
         prompt += `> 必须将长回复拆分成多条短消息（1-4条），严禁把所有话挤在一个气泡里！\n`;
+        prompt += `> 【重要约束】：绝对不要凭空捏造没有发生过的事情、没有做过的约定或不存在的剧情。请严格基于现有的聊天记录上下文进行自然的日常问候、吐槽或顺延当前话题。\n`;
+        prompt += `> 【格式约束】：你必须先输出 <thinking> 标签进行思考，然后再输出 JSON 数组。严禁将一句话强行拆断！\n`;
         
         // 注入最近聊天记录
         prompt += `\n【最近聊天记录】：\n`;
@@ -4930,7 +5213,8 @@ async function wcSimTriggerAI() {
         // 解析 JSON
         let replies = [];
         try {
-            let cleanText = content.replace(/```json/g, '').replace(/```/g, '').trim();
+            let cleanText = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+            cleanText = cleanText.replace(/```json/g, '').replace(/```/g, '').trim();
             const start = cleanText.indexOf('[');
             const end = cleanText.lastIndexOf(']');
             if (start !== -1 && end !== -1) {
@@ -4945,25 +5229,12 @@ async function wcSimTriggerAI() {
         } catch (e) {
             // 降级：如果解析失败，当纯文本处理 (仅限单聊)
             if (!chat.isGroup) {
-                replies = [{ content: content }];
+                let cleanText = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+                replies = [{ content: cleanText }];
             }
         }
 
-        // 强制拆分气泡逻辑
-        let finalReplies = [];
-        replies.forEach(reply => {
-            if (reply && reply.content) {
-                let parts = reply.content.match(/[^。！？~!?]+[。！？~!?]*/g);
-                if (parts && parts.length > 1) {
-                    parts.forEach(p => {
-                        if (p.trim()) finalReplies.push({ ...reply, content: p.trim() });
-                    });
-                } else {
-                    finalReplies.push(reply);
-                }
-            }
-        });
-        replies = finalReplies;
+        // 移除强制拆分逻辑，信任 AI 的 JSON 结构
 
         if (!chat.history) chat.history = [];
 
@@ -5154,6 +5425,7 @@ async function wcGeneratePhoneContacts() {
 
         const data = await response.json();
         let content = data.choices[0].message.content;
+        content = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
         content = content.replace(/```json/g, '').replace(/```/g, '').trim();
         const result = JSON.parse(content);
 
@@ -6403,10 +6675,12 @@ async function lsTriggerNpcMessage() {
         prompt += `${wbInfo}\n`;
         prompt += `内容要求：口语化，生活化，符合人设。拒绝油腻和AI味。\n`;
         
-        // 注入活人运转与碎片化规则
+        // 注入活人运转与思维链规则
         prompt += `【角色活人运转规则】\n`;
         prompt += `> 必须像真人一样聊天，拒绝机械回复。\n`;
         prompt += `> 必须将长回复拆分成多条短消息（1-4条），严禁把所有话挤在一个气泡里！\n`;
+        prompt += `> 【重要约束】：绝对不要凭空捏造没有发生过的事情、没有做过的约定或不存在的剧情。请严格基于现有的聊天记录上下文进行自然的日常问候、吐槽或顺延当前话题。\n`;
+        prompt += `> 【格式约束】：你必须先输出 <thinking> 标签进行思考，然后再输出 JSON 数组。严禁将一句话强行拆断！\n`;
 
         const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
             method: 'POST',
@@ -6423,7 +6697,8 @@ async function lsTriggerNpcMessage() {
         
         let actions = [];
         try {
-            let cleanText = content.replace(/```json/g, '').replace(/```/g, '').trim();
+            let cleanText = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+            cleanText = cleanText.replace(/```json/g, '').replace(/```/g, '').trim();
             const start = cleanText.indexOf('[');
             const end = cleanText.lastIndexOf(']');
             if (start !== -1 && end !== -1) {
@@ -6438,23 +6713,7 @@ async function lsTriggerNpcMessage() {
             console.error("JSON Parse Error", e);
         }
 
-        // 强制拆分气泡逻辑
-        let finalActions = [];
-        actions.forEach(action => {
-            if (action && action.content) {
-                let parts = action.content.match(/[^。！？~!?]+[。！？~!?]*/g);
-                if (parts && parts.length > 1) {
-                    parts.forEach(p => {
-                        if (p.trim()) finalActions.push({ ...action, content: p.trim() });
-                    });
-                } else {
-                    finalActions.push(action);
-                }
-            } else if (action) {
-                finalActions.push(action);
-            }
-        });
-        actions = finalActions;
+        // 移除强制拆分逻辑，信任 AI 的 JSON 结构
 
         if (actions.length === 0) return;
 
@@ -6805,7 +7064,8 @@ async function wcGenerateSummary() {
         });
 
         const data = await response.json();
-        const summary = data.choices[0].message.content;
+        let summary = data.choices[0].message.content;
+        summary = summary.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
 
         if (!char.memories) char.memories = [];
         char.memories.unshift({
@@ -6909,6 +7169,509 @@ function showMainSystemNotification(title, message, iconUrl = null) {
 }
 
 // ==========================================================================
+// 新增：一键破解 (同时生成隐私和收藏)
+// ==========================================================================
+async function wcGeneratePrivacyAndFavorites() {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    if (!char) return;
+
+    const apiConfig = await idb.get('ios_theme_api_config');
+    if (!apiConfig || !apiConfig.key) return alert("请先配置 API");
+
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) {
+        wcShowError("已达到API调用上限");
+        return;
+    }
+    sessionApiCallCount++;
+
+    wcShowLoading("正在一键破解手机数据...");
+
+    try {
+        const realMsgs = wcState.chats[char.id] || [];
+        const recentMsgs = realMsgs.slice(-30).map(m => `${m.sender==='me'?'User':char.name}: ${m.content}`).join('\n');
+        const chatConfig = char.chatConfig || {};
+        const userPersona = chatConfig.userPersona || wcState.user.persona || "无";
+
+        let wbInfo = "";
+        if (worldbookEntries.length > 0) {
+            const linkedIds = chatConfig.worldbookEntries || [];
+            const linkedEntries = worldbookEntries.filter(e => linkedIds.includes(e.id.toString()));
+            const entriesToUse = linkedEntries.length > 0 ? linkedEntries : worldbookEntries.slice(0, 10);
+            wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
+        }
+
+        let prompt = `你扮演角色：${char.name}。\n`;
+        prompt += `人设：${char.prompt}\n${wbInfo}\n`;
+        prompt += `【用户(User)设定】：${userPersona}\n`;
+        prompt += `【核心场景设定】：我（User）现在正在偷偷查看你（${char.name}）手机上的私密记录和微信收藏。\n`;
+        prompt += `【最近我们的聊天记录（20-30条）】：\n${recentMsgs}\n\n`;
+        
+        prompt += `请基于你的人设、我的设定，以及我们**最近的聊天上下文**，一次性生成你的【私密自慰记录】和【微信收藏内容】。\n`;
+        prompt += `【要求】：\n`;
+        prompt += `1. 私密记录 (privacy)：生成你最近一次的私密自慰记录，包含时间、状态、动作描述和内心感受。\n`;
+        prompt += `2. 收藏-备忘录 (memos)：生成 3 至 8 个备忘录，内容可以是日常碎片、对User的秘密想法、待办事项等。\n`;
+        prompt += `3. 收藏-手写日记 (diaries)：生成 1 至 2 个手写草稿日记。这是你深夜写下但没有发给User的真心话，情感要极其细腻、深刻、甚至带点偏执或脆弱。\n`;
+        prompt += `   - **字数要求**：每篇日记必须不少于 100 字！\n`;
+        prompt += `   - **排版与手账风格**：为了模拟真实的手写草稿和拼贴手账感，请在文本中随机使用以下标记：\n`;
+        prompt += `     - [涂改]写错或不想承认的话[/涂改]\n`;
+        prompt += `     - [高亮]特别重要的情绪或词语[/高亮]\n`;
+        prompt += `     - [拼贴]引用的聊天记录或突兀的想法[/拼贴]\n`;
+        prompt += `4. 所有内容必须和最近的聊天剧情强相关，拒绝凭空捏造无关剧情。\n`;
+        prompt += `5. 返回纯 JSON 对象，格式如下：\n`;
+        prompt += `{
+  "privacy": {
+    "time": "昨晚深夜 / 刚刚",
+    "status": "简短的状态概括，如：极度渴望、边哭边弄等",
+    "action": "具体的动作描述，你是如何触碰自己的，用了什么物品，或者看着什么东西",
+    "feeling": "详细的内心感受，对User的情感，身体的反应等"
+  },
+  "favorites": {
+    "memos": [
+      {"title": "备忘录标题", "content": "详细的备忘录正文内容...", "time": "2023-10-24 14:30"}
+    ],
+    "diaries": [
+      {"content": "手写日记的正文内容...", "time": "昨天深夜 03:15"}
+    ]
+  }
+}\n`;
+
+        const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.key}` },
+            body: JSON.stringify({
+                model: apiConfig.model,
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.8
+            })
+        });
+
+        const data = await response.json();
+        let content = data.choices[0].message.content;
+        content = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+        content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+        const resultData = JSON.parse(content);
+
+        if (!char.phoneData) char.phoneData = {};
+        
+        if (resultData.privacy) char.phoneData.privacy = resultData.privacy;
+        if (resultData.favorites) char.phoneData.favorites = resultData.favorites;
+        
+        wcSaveData();
+
+        // 如果当前停留在隐私或收藏页面，刷新一下UI
+        if (document.getElementById('wc-phone-app-privacy').style.display === 'flex') {
+            wcRenderPhonePrivacyContent();
+        }
+        if (document.getElementById('wc-phone-app-favorites').style.display === 'flex') {
+            wcRenderPhoneFavoritesContent();
+        }
+
+        wcShowSuccess("一键破解成功");
+
+    } catch (e) {
+        console.error(e);
+        wcShowError("生成失败");
+    }
+}
+
+// ==========================================================================
+// 新增：微信收藏 (Favorites) 逻辑
+// ==========================================================================
+function wcOpenPhoneFavorites() {
+    document.getElementById('wc-phone-app-favorites').style.display = 'flex';
+    wcRenderPhoneFavoritesContent();
+}
+
+function wcClosePhoneFavorites() {
+    document.getElementById('wc-phone-app-favorites').style.display = 'none';
+}
+
+function wcRenderPhoneFavoritesContent() {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    const content = document.getElementById('wc-phone-favorites-content');
+    if (!char) return;
+
+    const favData = (char.phoneData && char.phoneData.favorites) ? char.phoneData.favorites : null;
+
+    if (!favData) {
+        content.innerHTML = '<div style="padding: 40px 20px; text-align: center; color: #8E8E93; font-size: 14px;">点击左上角「刷新」<br>偷偷查看 Ta 的微信收藏...</div>';
+        return;
+    }
+
+    let html = `
+        <div class="wc-segmented-control" style="margin: 16px; background: #E5E5EA; display: flex; border-radius: 8px; padding: 2px;">
+            <div class="wc-segment-btn ${wcFavoritesTab === 'memos' ? 'active' : ''}" style="flex:1; text-align:center; padding:6px; border-radius:6px; font-size:14px; cursor:pointer; ${wcFavoritesTab === 'memos' ? 'background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.1);' : 'color:#8E8E93;'}" onclick="wcToggleFavoritesTab('memos')">备忘录</div>
+            <div class="wc-segment-btn ${wcFavoritesTab === 'diaries' ? 'active' : ''}" style="flex:1; text-align:center; padding:6px; border-radius:6px; font-size:14px; cursor:pointer; ${wcFavoritesTab === 'diaries' ? 'background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.1);' : 'color:#8E8E93;'}" onclick="wcToggleFavoritesTab('diaries')">手账日记</div>
+        </div>
+        <div style="padding: 0 16px 16px 16px; display: flex; flex-direction: column; gap: 12px;">
+    `;
+
+    if (wcFavoritesTab === 'memos') {
+        if (favData.memos && favData.memos.length > 0) {
+            favData.memos.forEach((memo, idx) => {
+                html += `
+                    <div style="background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); cursor: pointer;" onclick="wcOpenMemoDetail(${idx})">
+                        <div style="font-size: 16px; font-weight: 600; margin-bottom: 6px; color: #333;">${memo.title}</div>
+                        <div style="font-size: 14px; color: #666; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">${memo.content}</div>
+                        <div style="font-size: 11px; color: #B2B2B2; margin-top: 8px;">${memo.time}</div>
+                    </div>
+                `;
+            });
+        } else {
+            html += `<div style="text-align:center; color:#999; padding:20px;">暂无备忘录</div>`;
+        }
+    } else {
+        // Diaries - INS Korean Scrapbook Style
+        if (favData.diaries && favData.diaries.length > 0) {
+            favData.diaries.forEach(diary => {
+                // Random rotations and positions for scrapbook feel
+                const rot1 = (Math.random() * 4 - 2).toFixed(1);
+                const rot2 = (Math.random() * 6 - 3).toFixed(1);
+                const tapeColor = ['rgba(255,200,200,0.4)', 'rgba(200,255,200,0.4)', 'rgba(200,200,255,0.4)', 'rgba(240,240,200,0.5)'][Math.floor(Math.random()*4)];
+                
+                // Process content for scribbles and highlights
+                let processedContent = diary.content
+                    .replace(/\[涂改\](.*?)\[\/涂改\]/g, '<span style="text-decoration: line-through; text-decoration-color: #333; text-decoration-thickness: 2px; opacity: 0.7;">$1</span>')
+                    .replace(/\[高亮\](.*?)\[\/高亮\]/g, '<span style="background: linear-gradient(transparent 60%, rgba(255,255,0,0.6) 60%);">$1</span>')
+                    .replace(/\[拼贴\](.*?)\[\/拼贴\]/g, `<span style="background: #fff; border: 1px dashed #ccc; padding: 2px 4px; font-family: monospace; transform: rotate(${rot2}deg); display: inline-block; box-shadow: 1px 1px 2px rgba(0,0,0,0.1); margin: 2px;">$1</span>`);
+
+                html += `
+                    <div style="background: #faf9f5; border-radius: 4px; padding: 25px 20px; box-shadow: 2px 4px 12px rgba(0,0,0,0.08); position: relative; overflow: hidden; transform: rotate(${rot1}deg); margin-bottom: 15px; border: 1px solid #eaeaea;">
+                        <!-- Tape -->
+                        <div style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%) rotate(-2deg); width: 60px; height: 25px; background: ${tapeColor}; backdrop-filter: blur(2px); box-shadow: 0 1px 2px rgba(0,0,0,0.05);"></div>
+                        
+                        <!-- Date Stamp -->
+                        <div style="font-family: 'Courier New', Courier, monospace; font-size: 12px; color: #d35400; border: 1px solid #d35400; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; text-align: center; position: absolute; top: 15px; right: 15px; transform: rotate(15deg); opacity: 0.6; line-height: 1;">
+                            ${diary.time.split(' ')[0] || 'DATE'}
+                        </div>
+
+                        <!-- Content -->
+                        <div style="font-family: 'Kaiti', 'STKaiti', '楷体', serif; font-size: 16px; color: #3a3a3a; line-height: 2; letter-spacing: 1px; margin-top: 15px; white-space: pre-wrap; background-image: repeating-linear-gradient(transparent, transparent 31px, #e0e0e0 31px, #e0e0e0 32px); background-attachment: local; background-position: 0 4px;">${processedContent}</div>
+                        
+                        <!-- Time -->
+                        <div style="font-size: 11px; color: #a09e9b; margin-top: 20px; text-align: right; font-family: sans-serif;">${diary.time}</div>
+                    </div>
+                `;
+            });
+        } else {
+            html += `<div style="text-align:center; color:#999; padding:20px;">暂无日记</div>`;
+        }
+    }
+
+    html += '</div>';
+    content.innerHTML = html;
+}
+
+window.wcToggleFavoritesTab = function(tab) {
+    wcFavoritesTab = tab;
+    wcRenderPhoneFavoritesContent();
+}
+
+function wcOpenMemoDetail(idx) {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    if (!char || !char.phoneData || !char.phoneData.favorites || !char.phoneData.favorites.memos) return;
+    
+    const memo = char.phoneData.favorites.memos[idx];
+    if (!memo) return;
+
+    const detailView = document.getElementById('wc-phone-memo-detail');
+    const contentEl = document.getElementById('wc-phone-memo-detail-content');
+    
+    contentEl.innerHTML = `
+        <div style="font-size: 22px; font-weight: bold; margin-bottom: 10px;">${memo.title}</div>
+        <div style="font-size: 12px; color: #888; margin-bottom: 20px;">${memo.time}</div>
+        <div>${memo.content}</div>
+    `;
+    
+    detailView.style.display = 'flex';
+}
+
+async function wcGeneratePhoneFavorites() {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    if (!char) return;
+
+    const apiConfig = await idb.get('ios_theme_api_config');
+    if (!apiConfig || !apiConfig.key) return alert("请先配置 API");
+
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) {
+        wcShowError("已达到API调用上限");
+        return;
+    }
+    sessionApiCallCount++;
+
+    wcShowLoading("正在破解收藏夹...");
+
+    try {
+        const realMsgs = wcState.chats[char.id] || [];
+        const recentMsgs = realMsgs.slice(-30).map(m => `${m.sender==='me'?'User':char.name}: ${m.content}`).join('\n');
+        const chatConfig = char.chatConfig || {};
+        const userPersona = chatConfig.userPersona || wcState.user.persona || "无";
+
+        let wbInfo = "";
+        if (worldbookEntries.length > 0) {
+            const linkedIds = chatConfig.worldbookEntries || [];
+            const linkedEntries = worldbookEntries.filter(e => linkedIds.includes(e.id.toString()));
+            const entriesToUse = linkedEntries.length > 0 ? linkedEntries : worldbookEntries.slice(0, 10);
+            wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
+        }
+
+        let prompt = `你扮演角色：${char.name}。\n`;
+        prompt += `人设：${char.prompt}\n${wbInfo}\n`;
+        prompt += `【用户(User)设定】：${userPersona}\n`;
+        prompt += `【核心场景设定】：我（User）现在正在偷偷查看你（${char.name}）手机上的微信“我的收藏”。\n`;
+        prompt += `【最近我们的聊天记录（20-30条）】：\n${recentMsgs}\n\n`;
+        
+        prompt += `请基于你的人设、我的设定，以及我们**最近的聊天上下文**，生成你的微信收藏内容。\n`;
+        prompt += `【要求】：\n`;
+        prompt += `1. 生成 3 至 8 个备忘录 (memos)，内容可以是你的日常碎片、对User的秘密想法、待办事项等，必须和最近的聊天剧情强相关。\n`;
+        prompt += `2. 生成 1 至 2 个手写草稿日记 (diaries)。这是你深夜写下但没有发给User的真心话，情感要极其细腻、深刻、甚至带点偏执或脆弱。\n`;
+        prompt += `   - **字数要求**：每篇日记必须不少于 100 字！\n`;
+        prompt += `   - **排版与手账风格**：为了模拟真实的手写草稿和拼贴手账感，请在文本中随机使用以下标记：\n`;
+        prompt += `     - [涂改]写错或不想承认的话[/涂改]\n`;
+        prompt += `     - [高亮]特别重要的情绪或词语[/高亮]\n`;
+        prompt += `     - [拼贴]引用的聊天记录或突兀的想法[/拼贴]\n`;
+        prompt += `3. 返回纯 JSON 对象，格式如下：\n`;
+        prompt += `{
+  "memos": [
+    {"title": "备忘录标题", "content": "详细的备忘录正文内容...", "time": "2023-10-24 14:30"}
+  ],
+  "diaries": [
+    {"content": "手写日记的正文内容...", "time": "昨天深夜 03:15"}
+  ]
+}\n`;
+
+        const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.key}` },
+            body: JSON.stringify({
+                model: apiConfig.model,
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.8
+            })
+        });
+
+        const data = await response.json();
+        let content = data.choices[0].message.content;
+        content = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+        content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+        const favData = JSON.parse(content);
+
+        if (!char.phoneData) char.phoneData = {};
+        char.phoneData.favorites = favData;
+        wcSaveData();
+
+        wcRenderPhoneFavoritesContent();
+        wcShowSuccess("破解成功");
+
+    } catch (e) {
+        console.error(e);
+        wcShowError("生成失败");
+    }
+}
+
+// ==========================================================================
+// 新增：浏览器 (Browser) 逻辑
+// ==========================================================================
+function wcRenderPhoneBrowserContent() {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    const content = document.getElementById('wc-phone-browser-content');
+    if (!char) return;
+
+    const browserData = (char.phoneData && char.phoneData.browser) ? char.phoneData.browser : null;
+
+    if (!browserData) {
+        content.innerHTML = '<div style="padding: 40px 20px; text-align: center; color: #8E8E93; font-size: 14px;">点击左上角「刷新」<br>偷偷查看 Ta 的浏览器记录...</div>';
+        return;
+    }
+
+    let html = `
+        <div class="wc-segmented-control" style="margin: 16px; background: #E5E5EA;">
+            <div class="wc-segment-btn active" id="wc-seg-browser-history" onclick="wcToggleBrowserTab('history')">浏览记录</div>
+            <div class="wc-segment-btn" id="wc-seg-browser-posts" onclick="wcToggleBrowserTab('posts')">论坛帖子</div>
+        </div>
+    `;
+
+    // 历史记录 Tab
+    html += `<div id="wc-browser-tab-history" style="display: block; padding: 0 16px 16px 16px;">`;
+    if (browserData.history && browserData.history.length > 0) {
+        browserData.history.forEach(item => {
+            html += `
+                <div style="background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="font-size: 15px; font-weight: 600; color: #007AFF; margin-bottom: 4px; word-break: break-all;">${item.title}</div>
+                    <div style="font-size: 12px; color: #8E8E93; margin-bottom: 10px;">${item.url_placeholder}</div>
+                    <div style="font-size: 14px; color: #333; background: #FFF9C4; padding: 10px; border-radius: 6px; border-left: 3px solid #FFC107;">
+                        <span style="font-weight: bold; color: #F57F17;">[内心批注]</span> ${item.annotation}
+                    </div>
+                    <div style="font-size: 11px; color: #B2B2B2; margin-top: 8px; text-align: right;">${item.time}</div>
+                </div>
+            `;
+        });
+    } else {
+        html += `<div style="text-align: center; color: #888; padding: 20px;">暂无浏览记录</div>`;
+    }
+    html += `</div>`;
+
+    // 论坛帖子 Tab
+    html += `<div id="wc-browser-tab-posts" style="display: none; padding: 0 16px 16px 16px;">`;
+    if (browserData.posts && browserData.posts.length > 0) {
+        browserData.posts.forEach((post, idx) => {
+            html += `
+                <div style="background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); cursor: pointer;" onclick="wcOpenPostDetail(${idx})">
+                    <div style="font-size: 16px; font-weight: bold; color: #333; margin-bottom: 8px;">${post.title}</div>
+                    <div style="font-size: 14px; color: #666; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 10px;">${post.content}</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #8E8E93;">
+                        <span>楼主: ${post.author}</span>
+                        <span>💬 ${post.comments ? post.comments.length : 0} 评论</span>
+                    </div>
+                </div>
+            `;
+        });
+    } else {
+        html += `<div style="text-align: center; color: #888; padding: 20px;">暂无帖子</div>`;
+    }
+    html += `</div>`;
+
+    content.innerHTML = html;
+}
+
+function wcToggleBrowserTab(tab) {
+    document.getElementById('wc-seg-browser-history').classList.toggle('active', tab === 'history');
+    document.getElementById('wc-seg-browser-posts').classList.toggle('active', tab === 'posts');
+    document.getElementById('wc-browser-tab-history').style.display = tab === 'history' ? 'block' : 'none';
+    document.getElementById('wc-browser-tab-posts').style.display = tab === 'posts' ? 'block' : 'none';
+}
+
+function wcOpenPostDetail(idx) {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    if (!char || !char.phoneData || !char.phoneData.browser || !char.phoneData.browser.posts) return;
+    
+    const post = char.phoneData.browser.posts[idx];
+    if (!post) return;
+
+    const detailView = document.getElementById('wc-phone-post-detail');
+    const contentEl = document.getElementById('wc-phone-post-detail-content');
+    
+    let commentsHtml = '';
+    if (post.comments && post.comments.length > 0) {
+        post.comments.forEach((c, i) => {
+            const isChar = c.author === char.name || c.author === "楼主" && post.author === char.name;
+            const bg = isChar ? '#E3F2FD' : '#F9F9F9';
+            commentsHtml += `
+                <div style="background: ${bg}; padding: 12px; border-radius: 8px; margin-bottom: 8px;">
+                    <div style="font-size: 12px; color: #576B95; font-weight: bold; margin-bottom: 4px;">${i+1}楼 - ${c.author}</div>
+                    <div style="font-size: 14px; color: #333;">${c.content}</div>
+                </div>
+            `;
+        });
+    } else {
+        commentsHtml = '<div style="text-align: center; color: #888; font-size: 13px;">暂无评论</div>';
+    }
+
+    contentEl.innerHTML = `
+        <div style="padding: 20px; background: #fff; margin-bottom: 10px;">
+            <div style="font-size: 20px; font-weight: bold; margin-bottom: 10px; color: #000;">${post.title}</div>
+            <div style="font-size: 12px; color: #888; margin-bottom: 16px;">楼主: ${post.author}</div>
+            <div style="font-size: 16px; line-height: 1.6; color: #333; white-space: pre-wrap;">${post.content}</div>
+        </div>
+        <div style="padding: 16px; background: #fff;">
+            <div style="font-size: 14px; font-weight: bold; margin-bottom: 12px; color: #8E8E93;">全部评论</div>
+            ${commentsHtml}
+        </div>
+    `;
+    
+    detailView.style.display = 'flex';
+}
+
+async function wcGeneratePhoneBrowser() {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    if (!char) return;
+
+    const apiConfig = await idb.get('ios_theme_api_config');
+    if (!apiConfig || !apiConfig.key) return alert("请先配置 API");
+
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) {
+        wcShowError("已达到API调用上限");
+        return;
+    }
+    sessionApiCallCount++;
+
+    wcShowLoading("正在提取浏览器数据...");
+
+    try {
+        const realMsgs = wcState.chats[char.id] || [];
+        const recentMsgs = realMsgs.slice(-30).map(m => `${m.sender==='me'?'User':char.name}: ${m.content}`).join('\n');
+        const chatConfig = char.chatConfig || {};
+        const userPersona = chatConfig.userPersona || wcState.user.persona || "无";
+
+        let wbInfo = "";
+        if (worldbookEntries.length > 0) {
+            const linkedIds = chatConfig.worldbookEntries || [];
+            const linkedEntries = worldbookEntries.filter(e => linkedIds.includes(e.id.toString()));
+            const entriesToUse = linkedEntries.length > 0 ? linkedEntries : worldbookEntries.slice(0, 10);
+            wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
+        }
+
+        let prompt = `你扮演角色：${char.name}。\n`;
+        prompt += `人设：${char.prompt}\n${wbInfo}\n`;
+        prompt += `【用户(User)设定】：${userPersona}\n`;
+        prompt += `【核心场景设定】：我（User）现在正在偷偷查看你（${char.name}）手机上的浏览器APP。\n`;
+        prompt += `【最近我们的聊天记录（20-30条）】：\n${recentMsgs}\n\n`;
+        
+        prompt += `请基于你的人设、我的设定，以及我们**最近的聊天上下文**，生成你的浏览器数据。\n`;
+        prompt += `【要求】：\n`;
+        prompt += `1. 生成 4 至 8 条浏览记录 (history)。标题必须反映你最近在偷偷搜索或关注什么（比如因为聊天中的某件事去查资料、查怎么回复我、查某种情感等）。必须包含你当时的内心批注 (annotation)。\n`;
+        prompt += `2. 生成 1 至 3 个论坛帖子 (posts)。可以是你在匿名论坛发帖求助/吐槽，也可以是你浏览了别人的帖子并在下面评论。每个帖子必须包含 5 至 10 个评论 (comments)，评论里要有网友的回复，也要有你的互动。\n`;
+        prompt += `3. 返回纯 JSON 对象，格式如下：\n`;
+        prompt += `{
+  "history": [
+    {"title": "搜索的网页标题", "url_placeholder": "www.baidu.com/s?wd=...", "annotation": "你浏览这个网页时的内心真实想法", "time": "今天 10:20"}
+  ],
+  "posts": [
+    {
+      "title": "帖子标题", 
+      "content": "帖子正文...", 
+      "author": "匿名用户 / ${char.name}", 
+      "comments": [
+        {"author": "网友A", "content": "评论内容"},
+        {"author": "${char.name}", "content": "你的回复"}
+      ]
+    }
+  ]
+}\n`;
+
+        const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.key}` },
+            body: JSON.stringify({
+                model: apiConfig.model,
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.8
+            })
+        });
+
+        const data = await response.json();
+        let content = data.choices[0].message.content;
+        content = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+        content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+        const browserData = JSON.parse(content);
+
+        if (!char.phoneData) char.phoneData = {};
+        char.phoneData.browser = browserData;
+        wcSaveData();
+
+        wcRenderPhoneBrowserContent();
+        wcShowSuccess("提取成功");
+
+    } catch (e) {
+        console.error(e);
+        wcShowError("生成失败");
+    }
+}
+
+// ==========================================================================
 // 全局补丁与覆盖 (Global Patches & Overrides)
 // ==========================================================================
 (function applyGlobalPatches() {
@@ -6969,4 +7732,3 @@ function showMainSystemNotification(title, message, iconUrl = null) {
         }
     };
 })();
-
