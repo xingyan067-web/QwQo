@@ -661,7 +661,60 @@ button.action-btn.destructive { background-color: #ff3b30; color: white; margin-
 .wc-bubble.me:has(.wc-quote-block) { align-items: flex-start; }
 .wc-bubble-sticker { background: transparent !important; border: none !important; padding: 0; }
 .wc-sticker-img { max-width: 120px; max-height: 120px; border-radius: 4px; }
-.wc-bubble-img { max-width: 100%; border-radius: 10px; display: block; }
+/* --- 修改：限制真实图片的最大尺寸 --- */
+.wc-bubble-img { 
+    max-width: 160px; /* 原来是 100%，现在改小 */
+    max-height: 200px; 
+    border-radius: 10px; 
+    display: block; 
+    object-fit: cover; /* 保持比例裁剪 */
+    cursor: pointer;
+}
+
+/* --- 新增：文字描述图片的 100x100 占位图样式 --- */
+.wc-text-img-placeholder {
+    width: 100px;
+    height: 100px;
+    background-color: #E5E5EA;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #8E8E93;
+    font-size: 10px;
+    border: 1px solid #D1D1D6;
+    overflow: hidden;
+    text-align: center;
+    padding: 5px;
+}
+
+.wc-text-img-placeholder svg {
+    width: 24px;
+    height: 24px;
+    margin-bottom: 4px;
+    opacity: 0.5;
+}
+
+/* --- 修改：朋友圈图片占位符强制 100x100 --- */
+.wc-moment-image-placeholder {
+    width: 100px !important;  /* 强制宽度 */
+    height: 100px !important; /* 强制高度 */
+    max-width: none !important;
+    background: #F2F2F7;
+    border: 1px solid #E5E5EA;
+    border-radius: 4px;
+    padding: 0 !important; /* 清除内边距 */
+    margin-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--wc-text-secondary);
+    font-size: 10px !important;
+    text-align: center;
+    overflow: hidden;
+}
 
 /* 修复：引用消息过长不换行的问题 */
 .wc-quote-block {
@@ -1129,4 +1182,87 @@ button.action-btn.destructive { background-color: #ff3b30; color: white; margin-
     box-shadow: 0 1px 2px rgba(0,0,0,0.05);
     backdrop-filter: blur(2px);
     z-index: 20;
+}
+/* ========================================== */
+/* 修复：多选模式下底部被遮挡的问题 */
+/* ========================================== */
+.wc-chat-scroll-area.multi-select-mode {
+    padding-bottom: calc(80px + var(--wc-safe-area-bottom)) !important;
+}
+
+/* ========================================== */
+/* 世界书：韩系 INS 胶带贴纸风分组视图 */
+/* ========================================== */
+.ins-group-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 20px;
+    padding: 30px 15px;
+}
+.ins-group-card {
+    width: 145px;
+    height: 145px;
+    background: #faf9f5;
+    border: 1px solid #eaeaea;
+    box-shadow: 2px 4px 12px rgba(0,0,0,0.06);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.2s;
+    border-radius: 4px;
+}
+.ins-group-card:active {
+    filter: brightness(0.95);
+}
+.ins-tape {
+    position: absolute;
+    top: -10px;
+    left: 50%;
+    width: 65px;
+    height: 22px;
+    backdrop-filter: blur(2px);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    z-index: 2;
+}
+.ins-group-title {
+    font-family: 'Kaiti', 'STKaiti', '楷体', serif;
+    font-size: 18px;
+    font-weight: bold;
+    color: #3a3a3a;
+    text-align: center;
+    margin-bottom: 8px;
+    padding: 0 10px;
+    word-break: break-all;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.ins-group-count {
+    font-size: 12px;
+    color: #a09e9b;
+    font-family: sans-serif;
+}
+.ins-group-delete {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(255, 59, 48, 0.08);
+    color: #ff3b30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: bold;
+    transition: background 0.2s;
+}
+.ins-group-delete:active {
+    background: rgba(255, 59, 48, 0.2);
 }
