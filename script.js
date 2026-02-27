@@ -2210,6 +2210,45 @@ function wcFormatTime(timestamp) {
     return `${hours}:${minutes}`;
 }
 
+// --- 新增/强化：时间感知计算器 (融合 v2.0 规则) ---
+function wcGenerateTimeGapPrompt(msgs, referenceTime = Date.now()) {
+    if (!msgs || msgs.length === 0) return "";
+    
+    // 找到最后一条实质性消息（排除系统提示和报错）
+    let lastMsgTime = 0;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].type !== 'system' && !msgs[i].isError) {
+            lastMsgTime = msgs[i].time;
+            break;
+        }
+    }
+
+    if (lastMsgTime === 0) return "";
+
+    const gapMs = referenceTime - lastMsgTime;
+    const gapHours = Math.floor(gapMs / (1000 * 60 * 60));
+    const gapDays = Math.floor(gapHours / 24);
+
+    // 如果间隔小于 2 小时，视为连续聊天，不触发强烈的断联感知
+    if (gapHours < 2) return "";
+
+    let prompt = `\n【时间感知与断联反应 (最高优先级)】\n`;
+    prompt += `> 内部信息：距离你们上一次聊天已经过去了 ${gapDays > 0 ? gapDays + ' 天' : gapHours + ' 个小时'}。\n`;
+    
+    if (gapDays >= 3) {
+        prompt += `> 状态要求：这是一个很长的空白期！请在回复中强烈且自然地体现出“久别重逢”、“漫长等待”或“断联后的情绪”（如：担忧、思念、生气、试探、冷淡等，必须符合你的人设）。\n`;
+    } else if (gapDays >= 1) {
+        prompt += `> 状态要求：自然地体现出隔天聊天的感觉（如：关心对方昨天/这几天去哪了，或者分享自己这几天的状态）。\n`;
+    } else if (gapHours >= 2) {
+        prompt += `> 状态要求：自然地体现出半天没联系的时间流逝感（如：问问对方这半天去忙什么了，或者顺着当前时间打招呼）。\n`;
+    }
+
+    prompt += `> 【硬性禁止】：绝对不要机械地报出具体数字（禁止说“我们已经3天没说话了”或“过了5个小时”）。\n`;
+    prompt += `> 【表现手法】：时间必须自然融入对话。通过语气、微动作（MicroActions）、或者对当前环境/光线的描写来侧面烘托时间感。情绪是底色，自然流露，而非刻意展示。\n`;
+
+    return prompt;
+}
+
 function wcRenderMessages(charId) {
     const container = document.getElementById('wc-chat-messages');
     const anchor = document.getElementById('wc-chat-scroll-anchor');
@@ -2560,15 +2599,31 @@ async function wcTriggerAI(charIdOverride = null) {
         const minutes = now.getMinutes();
         const timeString = `${year}年${month}月${date}日 ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
         const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
-        const currentTimeInfo = `【当前现实时间】\n${timeString} ${dayString}\n请务必具备时间观念！你的作息、行为必须符合当前的时间点和星期几（例如：半夜不要说刚下课，周末通常不上课/不上班，除非人设特殊规定）。\n\n`;
-
-        // ==========================================
-        // 核心修改：强化系统提示词，注入活人运转与思维链
-        // ==========================================
-        let systemPrompt = `你正在参与一个沉浸式的微信聊天模拟。你是一个有独立思考能力、有自己生活的真实人类，绝对不要像AI或NPC一样机械回复。\n`;
-        systemPrompt += currentTimeInfo;
         
-        systemPrompt += `【角色活人运转 (核心心理学)】
+        // 融合 v2.0 规则：根据当前时间段赋予角色基础状态 (TimeSlots)
+        let timeSlotVibe = "";
+        if (hours >= 5 && hours < 8) timeSlotVibe = "清晨：可能带着慵懒、柔软或起床气，语速较慢。";
+        else if (hours >= 8 && hours < 12) timeSlotVibe = "上午：清醒、有活力，适合正常交流。";
+        else if (hours >= 12 && hours < 18) timeSlotVibe = "下午：平稳，午后可能有些懒洋洋。";
+        else if (hours >= 18 && hours < 21) timeSlotVibe = "傍晚：放松，容易感怀，愿意聊闲话，可能注意到光线变化。";
+        else if (hours >= 21 && hours < 24) timeSlotVibe = "夜晚：放松，更容易敞开心扉，话可能变少但更深私密。";
+        else timeSlotVibe = "深夜/凌晨：如果醒着可能是睡不着或有心事。话少、简短、停顿长。";
+
+        let systemPrompt = `你正在参与一个沉浸式的微信聊天模拟。你是一个有独立思考能力、有自己生活的真实人类，绝对不要像AI或NPC一样机械回复。\n`;
+        
+        systemPrompt += `【当前现实时间与状态】\n`;
+        systemPrompt += `当前时间：${timeString} ${dayString}\n`;
+        systemPrompt += `当前时间段状态参考：${timeSlotVibe}\n`;
+        systemPrompt += `请务必具备时间观念！你的作息、行为必须符合当前的时间点和星期几（例如：半夜不要说刚下课，周末通常不上课/不上班，除非人设特殊规定）。\n`;
+
+        // 获取聊天记录并计算时间差感知
+        const msgs = wcState.chats[charId] || [];
+        const timeGapPrompt = wcGenerateTimeGapPrompt(msgs, now.getTime());
+        if (timeGapPrompt) {
+            systemPrompt += timeGapPrompt;
+        }
+
+        systemPrompt += `\n【角色活人运转 (核心心理学)】
 > Personality: HEXACO-driven, 动态性格特征，必须包含内心冲突。
 > Filter: 情绪由认知图式(schema-bias)驱动，拒绝纯条件反射式的机械回复。
 > Vitality: +inconsistency(允许前后矛盾) +emoflux(情绪波动) +microreact(微反应) +minddrift(思维发散)。
@@ -2678,7 +2733,7 @@ JSON 数组中的每个元素代表一条消息、表情包或动作指令。请
         }
 
         let limit = config.contextLimit > 0 ? config.contextLimit : 30;
-        const msgs = wcState.chats[charId] || [];
+ wcState.chats[charId] || [];
         const recentMsgs = msgs.slice(-limit);
         
         const messages = [{ role: "system", content: systemPrompt }];
@@ -7720,35 +7775,4 @@ async function wcGeneratePhoneBrowser() {
             padding: 0 20px; box-shadow: 0 1px 5px rgba(0,0,0,0.1);
         }
         .edit-btn {
-            padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: 600; cursor: pointer;
-        }
-        .edit-btn.cancel { background: #E5E5EA; color: #000; }
-        .edit-btn.save { background: #007AFF; color: #fff; }
-    `;
-    document.head.appendChild(style);
-    
-    const editBar = document.createElement('div');
-    editBar.id = 'home-edit-bar';
-    editBar.innerHTML = `
-        <div class="edit-btn cancel" onclick="cancelHomeEdit()">取消</div>
-        <div style="font-weight:bold;">编辑主屏幕</div>
-        <div class="edit-btn save" onclick="saveHomeEdit()">完成</div>
-    `;
-    document.body.appendChild(editBar);
-
-    window.applyFont = function(url) {
-        const finalUrl = url || document.getElementById('fontUrlInput').value;
-        const fontStyle = document.getElementById('dynamic-font-style');
-        if (finalUrl && fontStyle) {
-            fontStyle.textContent = `
-                @font-face { font-family: 'CustomFont'; src: url('${finalUrl}'); } 
-                body, input, textarea, button, select, 
-                .ls-view, #wechat-root, #wc-view-phone-sim, .wc-page, .wc-bubble, 
-                .ls-feed-text, .ls-widget-note-text, .wc-system-msg-text { 
-                    font-family: 'CustomFont', sans-serif !important; 
-                }
-            `;
-            saveThemeSettings();
-        }
-    };
-})();
+            padding: 8px 16px; border-radius: 2
