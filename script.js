@@ -2396,9 +2396,19 @@ function wcHandleReply() {
     const msg = msgs.find(m => m.id === wcState.selectedMsgId);
     if (msg) {
         wcState.replyingToMsgId = msg.id;
-        let text = msg.content;
-        if (msg.type !== 'text') text = `[${msg.type}]`;
-        document.getElementById('wc-quote-text-content').innerText = text;
+        let displayHtml = '';
+        
+        // 判断消息类型，如果是表情包或图片，则显示图片标签
+        if (msg.type === 'text') {
+            displayHtml = msg.content;
+        } else if (msg.type === 'sticker' || msg.type === 'image') {
+            displayHtml = `[图片] <img src="${msg.content}">`;
+        } else {
+            displayHtml = `[${msg.type}]`;
+        }
+        
+        // 注意：这里把 innerText 改成了 innerHTML，以便渲染 img 标签
+        document.getElementById('wc-quote-text-content').innerHTML = displayHtml;
         document.getElementById('wc-quote-preview-area').style.display = 'flex';
         document.getElementById('wc-chat-input').focus();
     }
@@ -2493,9 +2503,19 @@ function wcSendMsg() {
         const msgs = wcState.chats[wcState.activeChatId];
         const replyMsg = msgs.find(m => m.id === wcState.replyingToMsgId);
         if (replyMsg) {
-            let replyText = replyMsg.content;
-            if (replyMsg.type !== 'text') replyText = `[${replyMsg.type}]`;
-            extra.quote = `${replyMsg.sender === 'me' ? wcState.user.name : wcState.characters.find(c=>c.id===wcState.activeChatId).name}: ${replyText}`;
+            let replyContentHtml = '';
+            
+            // 判断被引用的消息类型，生成对应的 HTML
+            if (replyMsg.type === 'text') {
+                replyContentHtml = replyMsg.content;
+            } else if (replyMsg.type === 'sticker' || replyMsg.type === 'image') {
+                replyContentHtml = `<img src="${replyMsg.content}">`;
+            } else {
+                replyContentHtml = `[${replyMsg.type}]`;
+            }
+            
+            const senderName = replyMsg.sender === 'me' ? wcState.user.name : wcState.characters.find(c=>c.id===wcState.activeChatId).name;
+            extra.quote = `${senderName}: ${replyContentHtml}`;
         }
         wcCancelQuote();
     }
