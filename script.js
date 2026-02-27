@@ -39,9 +39,20 @@ let wcFavoritesTab = 'memos'; // 收藏页面当前 Tab: 'memos' 或 'diaries'
 
 // 隐私与安全全局变量
 let privacyStepCount = parseInt(localStorage.getItem('ios_theme_steps')) || 0;
+let privacyLastDate = localStorage.getItem('ios_theme_step_date') || new Date().toDateString();
 let privacyLastMotionTime = 0;
-let privacyLastAccel = {x: 0, y: 0, z: 0};
 let isMotionListenerAdded = false;
+
+// 检查是否是新的一天，如果是则步数清零
+function checkNewDay() {
+    const today = new Date().toDateString();
+    if (privacyLastDate !== today) {
+        privacyStepCount = 0;
+        privacyLastDate = today;
+        localStorage.setItem('ios_theme_steps', 0);
+        localStorage.setItem('ios_theme_step_date', today);
+    }
+}
 
 // --- 强化：NPC 头像列表 (必须使用提供的图片) ---
 const npcAvatarList = [
@@ -507,6 +518,7 @@ function closeAppleIdSettings() { document.getElementById('appleIdSettingsModal'
 
 // --- 隐私与安全 交互 (新增) ---
 function openPrivacySettings() {
+    checkNewDay(); // 每次打开检查是否需要清零
     document.getElementById('privacySettingsModal').classList.add('open');
     updatePrivacyUI();
     requestMotionPermission();
@@ -519,22 +531,26 @@ function closePrivacySettings() {
 
 function updatePrivacyUI() {
     document.getElementById('privacyStepCount').innerText = `${privacyStepCount} 步`;
-    const distance = (privacyStepCount * 0.7 / 1000).toFixed(2);
+    const distance = (privacyStepCount * 0.7 / 1000).toFixed(2); // 假设每步 0.7 米
     document.getElementById('privacyDistance').innerText = `${distance} km`;
 }
 
 function requestMotionPermission() {
     if (isMotionListenerAdded) return;
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        // iOS 13+ 需要用户点击触发授权
         DeviceMotionEvent.requestPermission()
             .then(permissionState => {
                 if (permissionState === 'granted') {
                     window.addEventListener('devicemotion', handleMotion);
                     isMotionListenerAdded = true;
+                } else {
+                    alert("需要允许运动与健身权限才能记录步数");
                 }
             })
             .catch(console.error);
     } else {
+        // 安卓或旧版 iOS 直接监听
         window.addEventListener('devicemotion', handleMotion);
         isMotionListenerAdded = true;
     }
@@ -543,38 +559,54 @@ function requestMotionPermission() {
 function handleMotion(event) {
     const acc = event.accelerationIncludingGravity;
     if (!acc) return;
+    
+    // 计算三轴加速度的矢量幅度 (重力约为 9.8)
+    const magnitude = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
     const curTime = Date.now();
-    if ((curTime - privacyLastMotionTime) > 300) {
-        const deltaX = Math.abs(privacyLastAccel.x - acc.x);
-        const deltaY = Math.abs(privacyLastAccel.y - acc.y);
-        const deltaZ = Math.abs(privacyLastAccel.z - acc.z);
-        // 简单的步数检测阈值
-        if (deltaX > 2 || deltaY > 2 || deltaZ > 2) {
-            privacyStepCount++;
-            localStorage.setItem('ios_theme_steps', privacyStepCount);
-            updatePrivacyUI();
-            privacyLastMotionTime = curTime;
-        }
+    
+    // 当幅度大于 11.5 (表示有明显的走动震动)，且距离上次计步超过 300ms (防抖)
+    if (magnitude > 11.5 && (curTime - privacyLastMotionTime) > 300) {
+        checkNewDay();
+        privacyStepCount++;
+        localStorage.setItem('ios_theme_steps', privacyStepCount);
+        updatePrivacyUI();
+        privacyLastMotionTime = curTime;
     }
-    privacyLastAccel = {x: acc.x, y: acc.y, z: acc.z};
 }
 
 function fetchLocation() {
     const locEl = document.getElementById('privacyLocation');
+    locEl.innerText = "高精度定位中...";
+    
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(async (pos) => {
             const lat = pos.coords.latitude;
             const lon = pos.coords.longitude;
             try {
-                // 使用免费的 OpenStreetMap 逆地理编码 API
-                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
+                // 使用 OpenStreetMap 获取中文高精度地址
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`, {
+                    headers: { 'Accept-Language': 'zh-CN' }
+                });
                 const data = await res.json();
-                locEl.innerText = data.display_name || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+                
+                // 提取精简的街道地址
+                let address = data.display_name;
+                if (data.address) {
+                    const a = data.address;
+                    address = `${a.city || a.town || a.province || ''} ${a.suburb || a.county || ''} ${a.road || ''}`.trim();
+                    if (!address) address = data.display_name;
+                }
+                
+                locEl.innerText = address || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
             } catch (e) {
                 locEl.innerText = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
             }
         }, (err) => {
             locEl.innerText = "定位失败或未授权";
+        }, {
+            enableHighAccuracy: true, // 开启高精度 GPS
+            timeout: 10000,
+            maximumAge: 0
         });
     } else {
         locEl.innerText = "设备不支持定位";
@@ -1201,18 +1233,21 @@ function switchWorldbookView(view) {
     const tabAll = document.getElementById('tab-wb-all');
     const tabGroup = document.getElementById('tab-wb-group');
     const title = document.getElementById('wbHeaderTitle');
+    const rightBtnContainer = document.getElementById('wbHeaderRightContainer');
 
     if (view === 'all') {
         container.style.transform = 'translateX(0)';
         tabAll.classList.add('active');
         tabGroup.classList.remove('active');
         title.innerText = "所有条目";
+        if(rightBtnContainer) rightBtnContainer.innerHTML = `<button class="nav-btn" onclick="openWorldbookEditor()"><svg class="svg-icon" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>`;
         renderWorldbookList();
     } else {
         container.style.transform = 'translateX(-50%)'; 
         tabAll.classList.remove('active');
         tabGroup.classList.add('active');
         title.innerText = "分组视图";
+        if(rightBtnContainer) rightBtnContainer.innerHTML = `<button class="nav-btn" onclick="addNewGroup()" style="font-size: 15px; font-weight: 600;">创建分组</button>`;
         renderGroupView();
     }
 }
@@ -1233,60 +1268,67 @@ function renderWorldbookList() {
 function renderGroupView() {
     const container = document.getElementById('worldbookGroupList');
     container.innerHTML = '';
+    
+    // 隐藏旧的底部添加按钮
+    const oldAddBtn = document.querySelector('.wb-add-group-btn');
+    if(oldAddBtn) oldAddBtn.style.display = 'none';
+
     if (worldbookGroups.length === 0) {
-        container.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">暂无分组，请点击下方添加</div>';
+        container.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">暂无分组，请点击右上角创建</div>';
         return;
     }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'ins-group-container';
+
+    // 胶带颜色库
+    const tapeColors = ['rgba(255,200,200,0.6)', 'rgba(200,255,200,0.6)', 'rgba(200,200,255,0.6)', 'rgba(240,240,200,0.7)'];
+
     worldbookGroups.forEach(group => {
         const groupEntries = worldbookEntries.filter(e => e.type === group);
-        const groupItem = document.createElement('div');
-        groupItem.className = 'wb-group-item';
-        const swipeWrapper = document.createElement('div');
-        swipeWrapper.className = 'wb-group-swipe-wrapper';
-        const swipeBox = document.createElement('div');
-        swipeBox.className = 'wb-swipe-box';
-        const header = document.createElement('div');
-        header.className = 'wb-group-header';
-        header.innerHTML = `<span class="wb-group-name">${group}</span><span class="wb-group-count">${groupEntries.length}</span>`;
         
-        let pressTimer;
-        const startPress = (e) => {
-            pressTimer = setTimeout(() => {
-                editWorldbookGroup(group);
-            }, 600);
-        };
-        const cancelPress = () => {
-            clearTimeout(pressTimer);
-        };
-        
-        header.addEventListener('touchstart', startPress, {passive: true});
-        header.addEventListener('touchend', cancelPress);
-        header.addEventListener('touchmove', cancelPress);
-        header.addEventListener('mousedown', startPress);
-        header.addEventListener('mouseup', cancelPress);
-        header.addEventListener('mouseleave', cancelPress);
+        // 随机旋转角度，制造错落感
+        const rot = (Math.random() * 6 - 3).toFixed(1); 
+        const tapeColor = tapeColors[Math.floor(Math.random() * tapeColors.length)];
+        const tapeRot = (Math.random() * 10 - 5).toFixed(1);
 
-        header.onclick = () => { groupItem.querySelector('.wb-group-content').classList.toggle('expanded'); };
+        const card = document.createElement('div');
+        card.className = 'ins-group-card';
+        card.style.transform = `rotate(${rot}deg)`;
+        card.onclick = () => openGroupDetailModal(group);
+
+        card.innerHTML = `
+            <div class="ins-tape" style="background: ${tapeColor}; transform: translateX(-50%) rotate(${tapeRot}deg);"></div>
+            <div class="ins-group-title">${group}</div>
+            <div class="ins-group-count">${groupEntries.length} 个条目</div>
+            <div class="ins-group-delete" onclick="event.stopPropagation(); deleteGroup('${group}')">×</div>
+        `;
         
-        const deleteBtn = document.createElement('div');
-        deleteBtn.className = 'wb-delete-btn';
-        deleteBtn.innerText = '删除';
-        deleteBtn.onclick = (e) => { e.stopPropagation(); deleteGroup(group); };
-        swipeBox.appendChild(header);
-        swipeBox.appendChild(deleteBtn);
-        swipeWrapper.appendChild(swipeBox);
-        addSwipeLogic(swipeBox);
-        const content = document.createElement('div');
-        content.className = 'wb-group-content';
-        if (groupEntries.length > 0) {
-            groupEntries.forEach(entry => { content.appendChild(createEntryElement(entry)); });
-        } else {
-            content.innerHTML = '<div style="padding:10px 16px; color:#999; font-size:13px;">无条目</div>';
-        }
-        groupItem.appendChild(swipeWrapper);
-        groupItem.appendChild(content);
-        container.appendChild(groupItem);
+        wrapper.appendChild(card);
     });
+
+    container.appendChild(wrapper);
+}
+function openGroupDetailModal(groupName) {
+    document.getElementById('wbGroupDetailTitle').innerText = groupName;
+    const container = document.getElementById('wbGroupDetailList');
+    container.innerHTML = '';
+    
+    const groupEntries = worldbookEntries.filter(e => e.type === groupName);
+    if (groupEntries.length === 0) {
+        container.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">该分组下暂无条目</div>';
+    } else {
+        groupEntries.forEach(entry => {
+            container.appendChild(createEntryElement(entry));
+        });
+    }
+    
+    document.getElementById('worldbookGroupDetailModal').classList.add('open');
+}
+
+function closeGroupDetailModal() {
+    document.getElementById('worldbookGroupDetailModal').classList.remove('open');
+    renderGroupView(); // 关闭时刷新一下背后的贴纸视图
 }
 
 function editWorldbookGroup(oldName) {
@@ -1456,6 +1498,13 @@ function saveWorldbookEntry() {
     } else {
         renderGroupView();
     }
+    
+    // 如果分组详情弹窗开着，同步刷新它
+    const detailModal = document.getElementById('worldbookGroupDetailModal');
+    if (detailModal && detailModal.classList.contains('open')) {
+        const currentGroup = document.getElementById('wbGroupDetailTitle').innerText;
+        openGroupDetailModal(currentGroup);
+    }
 }
 
 function deleteWorldbookEntry(id) {
@@ -1467,19 +1516,31 @@ function deleteWorldbookEntry(id) {
         } else {
             renderGroupView();
         }
+        
+        // 如果分组详情弹窗开着，同步刷新它
+        const detailModal = document.getElementById('worldbookGroupDetailModal');
+        if (detailModal && detailModal.classList.contains('open')) {
+            const currentGroup = document.getElementById('wbGroupDetailTitle').innerText;
+            openGroupDetailModal(currentGroup);
+        }
     } else {
         const items = document.querySelectorAll('.wb-swipe-box');
         items.forEach(el => el.style.transform = 'translateX(0)');
     }
 }
-
 function addNewGroup() {
-    const name = prompt("请输入新分组名称");
-    if (name && !worldbookGroups.includes(name)) {
-        worldbookGroups.push(name);
-        saveWorldbookData();
-        renderGroupView();
-    }
+    openTextEditModal("创建分组", "请输入新分组名称", "", (name) => {
+        if (name && name.trim() !== "") {
+            const trimmedName = name.trim();
+            if (!worldbookGroups.includes(trimmedName)) {
+                worldbookGroups.push(trimmedName);
+                saveWorldbookData();
+                renderGroupView();
+            } else {
+                alert("该分组名称已存在！");
+            }
+        }
+    });
 }
 
 function filterWorldbook(keyword) {
@@ -2302,7 +2363,23 @@ function wcRenderMessages(charId) {
         }
 
         let contentHtml = '';
-        if (msg.type === 'sticker') {
+        
+        // --- 修改开始：检测文字描述图片 ---
+        // 如果是文本类型，且以 [图片描述] 开头
+        if (msg.type === 'text' && msg.content.trim().startsWith('[图片描述]')) {
+            // 提取描述文字，去掉前缀
+            const descText = msg.content.replace('[图片描述]', '').trim();
+            contentHtml = `
+                <div class="wc-bubble ${msg.sender === 'me' ? 'me' : 'them'}" style="background: transparent; padding: 0; border: none;">
+                    ${quoteHtml}
+                    <div class="wc-text-img-placeholder" style="width: 100px; height: 100px; background-color: #E5E5EA; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #8E8E93; font-size: 10px; border: 1px solid #D1D1D6; overflow: hidden; text-align: center; padding: 5px; box-sizing: border-box;">
+                        <svg viewBox="0 0 24 24" fill="currentColor" style="width: 24px; height: 24px; margin-bottom: 4px; opacity: 0.5;"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                        <div style="overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; width: 100%;">${descText || '图片'}</div>
+                    </div>
+                </div>`;
+        } 
+        // --- 修改结束 ---
+        else if (msg.type === 'sticker') {
             contentHtml = `<div class="wc-bubble wc-bubble-sticker ${msg.sender === 'me' ? 'me' : 'them'}">${quoteHtml}<img src="${msg.content}" class="wc-sticker-img"></div>`;
         } else if (msg.type === 'image') {
             contentHtml = `<div class="wc-bubble wc-bubble-sticker ${msg.sender === 'me' ? 'me' : 'them'}">${quoteHtml}<img src="${msg.content}" class="wc-bubble-img"></div>`;
@@ -2502,6 +2579,16 @@ function wcToggleMultiSelectMsg(msgId) {
     }
     wcRenderMessages(wcState.activeChatId);
 }
+function wcHandleMultiSelect() {
+    wcState.isMultiSelectMode = true;
+    wcState.multiSelectedIds = [wcState.selectedMsgId];
+    wcHideContextMenu();
+    wcRenderMessages(wcState.activeChatId);
+    document.getElementById('wc-multi-select-footer').style.display = 'flex';
+    document.getElementById('wc-chat-footer').style.display = 'none';
+    // 修复：进入多选模式后强制滚动到底部，防止被遮挡
+    setTimeout(() => wcScrollToBottom(true), 50);
+}
 
 function wcHandleMultiDeleteAction() {
     if (wcState.multiSelectedIds.length === 0) return;
@@ -2639,10 +2726,11 @@ async function wcTriggerAI(charIdOverride = null) {
 【思维链与输出格式要求】
 你必须严格遵守 [incipere] 协议。在回复前，请先进入 <thinking> 标签进行深度推演。
 请按以下步骤思考：
-1. 自我意识校验：是否塑造鲜活真实人格？你是否具有自己的聊天习惯/风格？你想如何回应我？
-2. 真实聊天：正常人的注意力是有限的，不会每句话都非得逐句回复。不对已有信息进行重复反问。断点处理：若与上一条消息间隔较久，默认双方只是自然忙碌后重新拿起手机，自然接续话题。
-3. 逻辑检索：结合上下文和当前时间。
-4. 最后确认：整合以上，是否合理自然回复且不偏离人设？输出消息格式是否正确？
+1. 记忆与设定读取：你必须首先读取并理解系统提供给你的【世界观/背景设定】、【你的角色设定】以及【对方(用户)设定】。
+2. 上下文深度分析：系统严格限制了你当前能看到的【最近聊天记录】条数（即上下文记忆）。你必须仔细阅读这几条最新的上下文，结合用户的最新回复，理解当前对话的语境、情绪和话题走向。
+3. 自我意识校验：是否塑造鲜活真实人格？你是否具有自己的聊天习惯/风格？你想如何回应我？
+4. 真实聊天：正常人的注意力是有限的，不会每句话都非得逐句回复。不对已有信息进行重复反问。断点处理：若与上一条消息间隔较久，默认双方只是自然忙碌后重新拿起手机，自然接续话题。
+5. 最后确认：整合以上所有信息（世界书+人设+最新上下文），你的回复是否合理自然且不偏离人设？输出消息格式是否正确？
 
 【绝对输出规则-JSON格式(强制)】
 为了确保回复格式正确，你**必须且只能**返回一个 <thinking> 标签和一个标准的 JSON 数组。
@@ -2660,10 +2748,17 @@ JSON 数组中的每个元素代表一条消息、表情包或动作指令。请
    {"type":"text", "content":"完整的一句话或一段话。"}
 2. **表情包**
    {"type":"sticker", "content":"表情包名称"}
-3. **其他指令** (按需使用)
+3. **更换头像 (情头互动)**
+   如果你收到了用户发的图片，且用户明确表示这是“情头”、“头像”或者语境非常甜蜜合适，你可以决定更换自己的头像。
+   {"type":"change_avatar", "content":"图片ID"} 
+   (注意：如果你决定换头像，必须在content中填写你想使用的那张图片的【图片ID】。图片ID会在聊天记录的[发送了一张图片, 图片ID: xxx]中提供。请根据画面内容精准选择对应的ID！)
+4. **其他指令** (按需使用)
    {"type":"voice", "content":"语音内容"}
    {"type":"transfer", "amount":100, "note":"备注"}
    {"type":"invite", "status":"pending"} (恋人空间邀请)
+5. **朋友圈互动** (如果你在【朋友圈动态】中看到了感兴趣的内容，可以进行互动)
+   {"type":"moment_like", "content": 朋友圈ID数字}
+   {"type":"moment_comment", "momentId": 朋友圈ID数字, "content":"你的评论内容"}
 `;
 
         // 修复：只有绑定的恋人才能更新桌面小组件
@@ -2733,7 +2828,6 @@ JSON 数组中的每个元素代表一条消息、表情包或动作指令。请
         }
 
         let limit = config.contextLimit > 0 ? config.contextLimit : 30;
- wcState.chats[charId] || [];
         const recentMsgs = msgs.slice(-limit);
         
         const messages = [{ role: "system", content: systemPrompt }];
@@ -2763,7 +2857,8 @@ JSON 数组中的每个元素代表一条消息、表情包或动作指令。请
             
             if (m.type === 'image') {
                 const imageContent = [
-                    { type: "text", text: "[发送了一张图片]" },
+                    // 核心修改：把消息的唯一 ID 告诉 AI，让它能精准定位
+                    { type: "text", text: `[发送了一张图片, 图片ID: ${m.id}]` },
                     { type: "image_url", image_url: { url: m.content } }
                 ];
                 messages.push({
@@ -2887,7 +2982,66 @@ async function wcParseAIResponse(charId, text, stickerGroupIds) {
         
         if (action.type === 'transfer_action') { // 兼容旧逻辑
              wcAIHandleTransfer(charId, action.status);
-        } else if (action.type === 'transfer') {
+        } 
+        // --- 新增：处理换头像指令 (通过唯一ID精准匹配真实图片) ---
+        else if (action.type === 'change_avatar') {
+            const msgs = wcState.chats[charId] || [];
+            const targetId = action.content; // AI 返回的图片 ID
+            let selectedImage = null;
+
+            // 1. 优先：根据 AI 提供的 图片ID 精准查找那张图片
+            if (targetId) {
+                const targetMsg = msgs.find(m => m.id.toString() === targetId.toString() && m.type === 'image');
+                if (targetMsg) {
+                    selectedImage = targetMsg.content;
+                }
+            }
+
+            // 2. 兜底：如果 AI 没按格式输出 ID，或者找不到，降级使用最新的一张图片
+            if (!selectedImage) {
+                for (let k = msgs.length - 1; k >= 0; k--) {
+                    if (msgs[k].sender === 'me' && msgs[k].type === 'image') {
+                        selectedImage = msgs[k].content;
+                        break;
+                    }
+                }
+            }
+
+            if (selectedImage) {
+                const char = wcState.characters.find(c => c.id === charId);
+                if (char) {
+                    char.avatar = selectedImage; // 更换头像
+                    wcSaveData(); // 保存数据
+                    wcRenderAll(); // 刷新界面
+                    
+                    // 发送一条系统提示（仅自己可见）
+                    wcAddMessage(charId, 'system', 'system', `[系统提示: ${char.name} 已换上了你发送的图片作为头像]`, { style: 'transparent' });
+                    
+                    // 如果绑定了恋人空间，同步更新恋人空间头像
+                    if (lsState.isLinked && lsState.boundCharId === charId) {
+                        lsRenderMain();
+                    }
+                }
+            }
+        }
+        // --- 新增：处理朋友圈互动指令 ---
+        else if (action.type === 'moment_like') {
+            const momentId = parseInt(action.content || action.momentId);
+            if (momentId) {
+                wcAIHandleLike(charId, momentId);
+                wcAddMessage(charId, 'system', 'system', `[系统提示: 你刚刚点赞了用户的朋友圈]`, { hidden: true });
+            }
+        }
+        else if (action.type === 'moment_comment') {
+            const momentId = parseInt(action.momentId || action.content);
+            const commentText = action.content || action.comment;
+            if (momentId && commentText) {
+                wcAIHandleComment(charId, momentId, commentText);
+                wcAddMessage(charId, 'system', 'system', `[系统提示: 你刚刚评论了用户的朋友圈: "${commentText}"]`, { hidden: true });
+            }
+        }
+        // --- 新增结束 ---
+        else if (action.type === 'transfer') {
             wcAddMessage(charId, 'them', 'transfer', '转账', { amount: action.amount, note: action.note, status: 'pending', ...extra });
         } else if (action.type === 'voice') {
             wcAddMessage(charId, 'them', 'voice', action.content, extra);
@@ -3582,6 +3736,12 @@ function wcActionImageDesc() {
     if (desc) wcAddMessage(wcState.activeChatId, 'me', 'text', `[图片描述] ${desc}`);
 }
 
+// --- 预览图片 ---
+function wcPreviewImage(src) {
+    const win = window.open("", "_blank");
+    win.document.write(`<img src="${src}" style="width:100%">`);
+}
+
 // --- WeChat Memory ---
 function wcActionMemory() {
     wcCloseAllPanels();
@@ -4094,7 +4254,7 @@ function wcRenderMoments() {
     wcState.moments.forEach(moment => {
         let mediaHtml = '';
         if (moment.image) mediaHtml = `<img src="${moment.image}" class="wc-moment-image">`;
-        else if (moment.imageDesc) mediaHtml = `<div class="wc-moment-image-placeholder"><svg class="wc-icon" style="margin-bottom: 4px;" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><div>[图片] ${moment.imageDesc}</div></div>`;
+        else if (moment.imageDesc) mediaHtml = `<div class="wc-moment-image-placeholder" style="width: 100px !important; height: 100px !important; max-width: none !important; padding: 5px !important; box-sizing: border-box;"><svg class="wc-icon" style="margin-bottom: 4px; width: 24px; height: 24px;" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><div style="font-size: 10px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">${moment.imageDesc}</div></div>`;
         
         let likesHtml = '';
         if (moment.likes && moment.likes.length > 0) likesHtml = `<div class="wc-moment-like-row"><svg class="wc-icon wc-icon-fill" style="width:14px; height:14px; margin-right:4px;" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>${moment.likes.join(', ')}</div>`;
@@ -4597,7 +4757,13 @@ async function wcGeneratePhonePrivacy() {
             wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
         }
 
+        const now = new Date();
+        const timeString = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
+        const timePrompt = `\n【绝对时间基准】：当前现实时间是 ${timeString} ${dayString}。你生成的所有数据（包括时间戳、事件状态等）必须严格符合这个当前时间！绝对不能出现未来的时间，且早中晚的逻辑必须自洽。\n`;
+
         let prompt = `你扮演角色：${char.name}。\n`;
+        prompt += timePrompt;
         prompt += `人设：${char.prompt}\n${wbInfo}\n`;
         prompt += `【用户(User)设定】：${userPersona}\n`;
         prompt += `【核心场景设定】：我（User）现在正在偷偷查看你（${char.name}）手机上的私密记录APP。\n`;
@@ -4726,7 +4892,13 @@ async function wcGenerateCharWallet() {
         const msgs = wcState.chats[char.id] || [];
         const recentMsgs = msgs.slice(-20).map(m => `${m.sender==='me'?'User':char.name}: ${m.content}`).join('\n');
 
+        const now = new Date();
+        const timeString = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
+        const timePrompt = `\n【绝对时间基准】：当前现实时间是 ${timeString} ${dayString}。你生成的交易记录时间(time)必须在当前时间之前，且符合常理（如凌晨3点通常不会有早餐店消费）。\n`;
+
         let prompt = `你扮演角色：${char.name}。\n`;
+        prompt += timePrompt;
         prompt += `人设：${char.prompt}\n${wbInfo}\n`;
         prompt += `【用户(User)设定】：${userPersona}\n`;
         prompt += `【最近聊天记录】：\n${recentMsgs}\n\n`;
@@ -4924,7 +5096,8 @@ function renderSettingsUI(data) {
         </div>
 
         <div style="background: #fff; border-radius: 10px; padding: 16px; margin-bottom: 16px;">
-            <div style="font-size: 16px; font-weight: 600; margin-bottom: 10px;">屏幕使用时间</div>
+            <div style="font-size: 16px
+; font-weight: 600; margin-bottom: 10px;">屏幕使用时间</div>
             <div style="font-size: 24px; font-weight: bold; margin-bottom: 16px;">${data.screenTime}</div>
             <div style="font-size: 14px; color: #888; margin-bottom: 8px;">应用使用排行</div>
             ${appUsageHtml}
@@ -6365,14 +6538,18 @@ function lsRenderMain() {
         toggleCharWidget.checked = lsState.charWidgetEnabled;
         document.getElementById('ls-char-widget-controls').style.display = lsState.charWidgetEnabled ? 'flex' : 'none';
     }
+    // 更新隐藏日历的默认值
+    const datePicker = document.getElementById('ls-date-picker');
+    if (datePicker && lsState.startDate) {
+        datePicker.value = new Date(lsState.startDate).toISOString().slice(0,10);
+    }
 
     lsRenderFeed();
 }
 
-function lsEditStartDate() {
-    const input = prompt("修改恋爱开始日期 (格式: YYYY-MM-DD)", new Date(lsState.startDate).toISOString().slice(0,10));
-    if (input) {
-        const ts = new Date(input).getTime();
+function lsHandleDateChange(dateString) {
+    if (dateString) {
+        const ts = new Date(dateString).getTime();
         if (!isNaN(ts)) {
             lsState.startDate = ts;
             lsSaveData();
@@ -7276,7 +7453,13 @@ async function wcGeneratePrivacyAndFavorites() {
             wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
         }
 
+        const now = new Date();
+        const timeString = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
+        const timePrompt = `\n【绝对时间基准】：当前现实时间是 ${timeString} ${dayString}。你生成的所有数据（包括私密记录时间、备忘录时间、日记时间）必须严格符合这个当前时间！绝对不能出现未来的时间，且早中晚的逻辑必须自洽。\n`;
+
         let prompt = `你扮演角色：${char.name}。\n`;
+        prompt += timePrompt;
         prompt += `人设：${char.prompt}\n${wbInfo}\n`;
         prompt += `【用户(User)设定】：${userPersona}\n`;
         prompt += `【核心场景设定】：我（User）现在正在偷偷查看你（${char.name}）手机上的私密记录和微信收藏。\n`;
@@ -7492,7 +7675,13 @@ async function wcGeneratePhoneFavorites() {
             wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
         }
 
+        const now = new Date();
+        const timeString = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
+        const timePrompt = `\n【绝对时间基准】：当前现实时间是 ${timeString} ${dayString}。你生成的备忘录和日记的时间戳必须合理，不能超过当前时间，且内容要符合当前的时间段氛围。\n`;
+
         let prompt = `你扮演角色：${char.name}。\n`;
+        prompt += timePrompt;
         prompt += `人设：${char.prompt}\n${wbInfo}\n`;
         prompt += `【用户(User)设定】：${userPersona}\n`;
         prompt += `【核心场景设定】：我（User）现在正在偷偷查看你（${char.name}）手机上的微信“我的收藏”。\n`;
@@ -7689,7 +7878,13 @@ async function wcGeneratePhoneBrowser() {
             wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
         }
 
+        const now = new Date();
+        const timeString = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
+        const timePrompt = `\n【绝对时间基准】：当前现实时间是 ${timeString} ${dayString}。你生成的浏览记录时间(time)必须在当前时间之前，且搜索内容要符合当前的时间点（如深夜可能会搜索情感问题，白天可能会搜索工作/学习内容）。\n`;
+
         let prompt = `你扮演角色：${char.name}。\n`;
+        prompt += timePrompt;
         prompt += `人设：${char.prompt}\n${wbInfo}\n`;
         prompt += `【用户(User)设定】：${userPersona}\n`;
         prompt += `【核心场景设定】：我（User）现在正在偷偷查看你（${char.name}）手机上的浏览器APP。\n`;
@@ -7779,6 +7974,16 @@ async function wcGeneratePhoneBrowser() {
         }
         .edit-btn.cancel { background: #E5E5EA; color: #000; }
         .edit-btn.save { background: #007AFF; color: #fff; }
+        
+        /* 限制真实图片的最大尺寸 */
+        .wc-bubble-img { 
+            max-width: 160px !important; 
+            max-height: 200px !important; 
+            border-radius: 10px; 
+            display: block; 
+            object-fit: cover; 
+            cursor: pointer;
+        }
     `;
     document.head.appendChild(style);
     
