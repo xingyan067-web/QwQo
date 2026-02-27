@@ -7775,4 +7775,35 @@ async function wcGeneratePhoneBrowser() {
             padding: 0 20px; box-shadow: 0 1px 5px rgba(0,0,0,0.1);
         }
         .edit-btn {
-            padding: 8px 16px; border-radius: 2
+            padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: 600; cursor: pointer;
+        }
+        .edit-btn.cancel { background: #E5E5EA; color: #000; }
+        .edit-btn.save { background: #007AFF; color: #fff; }
+    `;
+    document.head.appendChild(style);
+    
+    const editBar = document.createElement('div');
+    editBar.id = 'home-edit-bar';
+    editBar.innerHTML = `
+        <div class="edit-btn cancel" onclick="cancelHomeEdit()">取消</div>
+        <div style="font-weight:bold;">编辑主屏幕</div>
+        <div class="edit-btn save" onclick="saveHomeEdit()">完成</div>
+    `;
+    document.body.appendChild(editBar);
+
+    window.applyFont = function(url) {
+        const finalUrl = url || document.getElementById('fontUrlInput').value;
+        const fontStyle = document.getElementById('dynamic-font-style');
+        if (finalUrl && fontStyle) {
+            fontStyle.textContent = `
+                @font-face { font-family: 'CustomFont'; src: url('${finalUrl}'); } 
+                body, input, textarea, button, select, 
+                .ls-view, #wechat-root, #wc-view-phone-sim, .wc-page, .wc-bubble, 
+                .ls-feed-text, .ls-widget-note-text, .wc-system-msg-text { 
+                    font-family: 'CustomFont', sans-serif !important; 
+                }
+            `;
+            saveThemeSettings();
+        }
+    };
+})();
