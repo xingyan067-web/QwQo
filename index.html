@@ -153,10 +153,12 @@
                         <div class="ls-heart-beat"><svg viewBox="0 0 24 24" fill="currentColor" width="1em" height="1em"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></div>
                         <div class="ls-avatar-circle" id="ls-main-char-avatar"></div>
                     </div>
-                    <div class="ls-days-counter" onclick="lsEditStartDate()">
+                        <div class="ls-days-counter" style="position: relative;">
                         <span class="ls-days-label">Together</span>
                         <span class="ls-days-num" id="ls-days-num">1</span>
                         <span class="ls-days-label">Days</span>
+                        <!-- 隐藏的系统日期选择器，覆盖在文字上方 -->
+                        <input type="date" id="ls-date-picker" onchange="lsHandleDateChange(this.value)" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;">
                     </div>
                     <div class="ls-date-display" id="ls-start-date-display">Since 2023.10.24</div>
                 </div>
@@ -771,7 +773,7 @@
                     </button>
                 </div>
                 <div class="header-title" id="wbHeaderTitle">所有条目</div>
-                <div class="header-right">
+                 <div class="header-right" id="wbHeaderRightContainer">
                     <button class="nav-btn" onclick="openWorldbookEditor()">
                         <svg class="svg-icon" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
                     </button>
@@ -802,6 +804,23 @@
                     <svg class="tab-icon" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
                     <span class="tab-label">分组视图</span>
                 </div>
+            </div>
+        </div>
+
+        <!-- 世界书分组详情弹窗 -->
+        <div class="settings-modal sub-page" id="worldbookGroupDetailModal">
+            <div class="settings-header">
+                <div class="header-left">
+                    <button class="nav-btn" onclick="closeGroupDetailModal()">
+                        <svg class="back-svg" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                        <span>返回</span>
+                    </button>
+                </div>
+                <div class="header-title" id="wbGroupDetailTitle">分组名称</div>
+                <div class="header-right"></div>
+            </div>
+            <div class="settings-content ios-settings-content">
+                <div class="wb-list-container" id="wbGroupDetailList"></div>
             </div>
         </div>
 
