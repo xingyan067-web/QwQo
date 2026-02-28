@@ -42,6 +42,38 @@ let privacyStepCount = parseInt(localStorage.getItem('ios_theme_steps')) || 0;
 let privacyLastDate = localStorage.getItem('ios_theme_step_date') || new Date().toDateString();
 let privacyLastMotionTime = 0;
 let isMotionListenerAdded = false;
+// 新增：地图与实时定位变量
+let privacyMap = null;
+let privacyMarker = null;
+let privacyWatchId = null;
+
+// 新增：全局位置缓存，供 AI 随时读取
+let globalCurrentAddress = "未知位置";
+
+// 新增：后台静默获取一次位置（不显示地图，只拿数据）
+function updateGlobalLocation() {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`, {
+                    headers: { 'Accept-Language': 'zh-CN' }
+                });
+                const data = await res.json();
+                let address = data.display_name;
+                if (data.address) {
+                    const a = data.address;
+                    address = `${a.city || a.town || a.province || ''} ${a.suburb || a.county || ''} ${a.road || ''}`.trim();
+                    if (!address) address = data.display_name;
+                }
+                globalCurrentAddress = address || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+            } catch (e) {
+                globalCurrentAddress = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+            }
+        }, () => {}, { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 });
+    }
+}
 
 // 检查是否是新的一天，如果是则步数清零
 function checkNewDay() {
@@ -527,6 +559,11 @@ function openPrivacySettings() {
 
 function closePrivacySettings() {
     document.getElementById('privacySettingsModal').classList.remove('open');
+    // 新增：关闭页面时停止高频实时定位，节省手机电量
+    if (privacyWatchId !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(privacyWatchId);
+        privacyWatchId = null;
+    }
 }
 
 function updatePrivacyUI() {
@@ -564,8 +601,8 @@ function handleMotion(event) {
     const magnitude = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
     const curTime = Date.now();
     
-    // 当幅度大于 11.5 (表示有明显的走动震动)，且距离上次计步超过 300ms (防抖)
-    if (magnitude > 11.5 && (curTime - privacyLastMotionTime) > 300) {
+    // 当幅度大于 12.5 (表示有明显的走动震动)，且距离上次计步超过 300ms (防抖)
+    if (magnitude > 12.5 && (curTime - privacyLastMotionTime) > 300) {
         checkNewDay();
         privacyStepCount++;
         localStorage.setItem('ios_theme_steps', privacyStepCount);
@@ -579,17 +616,44 @@ function fetchLocation() {
     locEl.innerText = "高精度定位中...";
     
     if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(async (pos) => {
+        // 如果之前有监听，先清除
+        if (privacyWatchId !== null) {
+            navigator.geolocation.clearWatch(privacyWatchId);
+        }
+        
+        // 使用 watchPosition 实时追踪真实位置
+        privacyWatchId = navigator.geolocation.watchPosition(async (pos) => {
             const lat = pos.coords.latitude;
             const lon = pos.coords.longitude;
+            
+            // --- 新增：初始化或更新地图 ---
+            if (!privacyMap) {
+                // 初始化地图，缩放级别为 16
+                privacyMap = L.map('privacyMap').setView([lat, lon], 16);
+                // 使用免费的 OpenStreetMap 图层
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap'
+                }).addTo(privacyMap);
+                // 添加位置标记
+                privacyMarker = L.marker([lat, lon]).addTo(privacyMap);
+                
+                // 修复：在隐藏的 div 中初始化地图可能导致显示不全，延迟刷新尺寸
+                setTimeout(() => {
+                    privacyMap.invalidateSize();
+                }, 400);
+            } else {
+                // 如果地图已存在，平滑移动到新位置并更新标记
+                privacyMap.setView([lat, lon]);
+                privacyMarker.setLatLng([lat, lon]);
+            }
+
+            // --- 原有的：获取中文城市街道地址 ---
             try {
-                // 使用 OpenStreetMap 获取中文高精度地址
                 const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`, {
                     headers: { 'Accept-Language': 'zh-CN' }
                 });
                 const data = await res.json();
                 
-                // 提取精简的街道地址
                 let address = data.display_name;
                 if (data.address) {
                     const a = data.address;
@@ -598,15 +662,17 @@ function fetchLocation() {
                 }
                 
                 locEl.innerText = address || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+                globalCurrentAddress = locEl.innerText; // 新增：同步给全局变量
             } catch (e) {
                 locEl.innerText = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+                globalCurrentAddress = locEl.innerText; // 新增：同步给全局变量
             }
         }, (err) => {
             locEl.innerText = "定位失败或未授权";
         }, {
-            enableHighAccuracy: true, // 开启高精度 GPS
+            enableHighAccuracy: true, // 强制开启高精度 GPS
             timeout: 10000,
-            maximumAge: 0
+            maximumAge: 0 // 拒绝使用缓存位置，必须是真实当前位置
         });
     } else {
         locEl.innerText = "设备不支持定位";
@@ -624,10 +690,19 @@ async function analyzeStorage() {
         '预设库': ['ios_theme_presets'],
         '系统设置': ['ios_theme_settings', 'ios_theme_api_config', 'ios_theme_layout']
     };
-    const colors = { '世界书': '#007aff', '图片/媒体': '#ff9500', '预设库': '#34c759', '系统设置': '#8e8e93' };
+    const colors = { 
+        '世界书': '#007aff', 
+        '图片/媒体': '#ff9500', 
+        '预设库': '#e2d6f5', 
+        '系统设置': '#8e8e93',
+        'WeChat数据': '#07c160', // 微信绿
+        '情侣空间': '#ff9a9e'    // 恋爱粉
+    };
+    
     let usage = {};
     let totalBytes = 0;
 
+    // 1. 统计 Theme Studio (idb) 的基础数据
     for (let category in keys) {
         usage[category] = 0;
         for (let key of keys[category]) {
@@ -640,6 +715,31 @@ async function analyzeStorage() {
         totalBytes += usage[category];
     }
 
+    // 2. 统计情侣空间数据 (idb)
+    const lsData = await idb.get('ls_data');
+    usage['情侣空间'] = lsData ? JSON.stringify(lsData).length : 0;
+    totalBytes += usage['情侣空间'];
+
+    // 3. 统计 WeChat 数据 (wcDb)
+    let wechatSize = 0;
+    try {
+        const wcStores = ['characters', 'chats', 'moments', 'masks'];
+        for (let store of wcStores) {
+            const data = await wcDb.getAll(store);
+            wechatSize += JSON.stringify(data || []).length;
+        }
+        const kvKeys = ['user', 'wallet', 'sticker_categories', 'css_presets', 'unread_counts'];
+        for (let key of kvKeys) {
+            const data = await wcDb.get('kv_store', key);
+            if (data) wechatSize += JSON.stringify(data).length;
+        }
+    } catch (e) {
+        console.error("读取 WeChat 存储大小失败", e);
+    }
+    usage['WeChat数据'] = wechatSize;
+    totalBytes += wechatSize;
+
+    // 绘制图表
     const canvas = document.getElementById('storageChart');
     const ctx = canvas.getContext('2d');
     const centerX = canvas.width / 2;
@@ -741,13 +841,14 @@ async function exportAllData() {
         }
     }
 
-    // 2. 导出 WeChat 数据
+    // 2. 导出 WeChat 数据 (包含 char 的手机数据)
     const wechatData = {};
     wechatData.user = await wcDb.get('kv_store', 'user');
     wechatData.wallet = await wcDb.get('kv_store', 'wallet');
     wechatData.stickerCategories = await wcDb.get('kv_store', 'sticker_categories');
     wechatData.cssPresets = await wcDb.get('kv_store', 'css_presets');
-    wechatData.characters = await wcDb.getAll('characters');
+    wechatData.unreadCounts = await wcDb.get('kv_store', 'unread_counts'); // 补充未读消息
+    wechatData.characters = await wcDb.getAll('characters'); // 这里天然包含了 phoneData 和 phoneConfig
     wechatData.masks = await wcDb.getAll('masks');
     wechatData.moments = await wcDb.getAll('moments');
     
@@ -780,12 +881,11 @@ function importAllData(input) {
     reader.onload = async function(e) {
         try {
             const json = JSON.parse(e.target.result);
-            // 兼容旧版备份签名
             if (json.signature !== 'ios_theme_studio_backup' && json.signature !== 'ios_theme_studio_full_backup') {
                 return alert("导入失败：文件格式不正确。");
             }
             
-            if (confirm("这将覆盖当前所有数据（包括聊天记录），确定要恢复吗？")) {
+            if (confirm("这将覆盖当前所有数据（包括聊天记录和对方手机数据），确定要恢复吗？")) {
                 const data = json.data;
                 
                 // 1. 恢复 Theme Studio 数据
@@ -795,15 +895,15 @@ function importAllData(input) {
                     }
                 }
 
-                // 2. 恢复 WeChat 数据 (如果存在)
+                // 2. 恢复 WeChat 数据
                 if (data['wechat_backup']) {
                     const wd = data['wechat_backup'];
                     if (wd.user) await wcDb.put('kv_store', wd.user, 'user');
                     if (wd.wallet) await wcDb.put('kv_store', wd.wallet, 'wallet');
                     if (wd.stickerCategories) await wcDb.put('kv_store', wd.stickerCategories, 'sticker_categories');
                     if (wd.cssPresets) await wcDb.put('kv_store', wd.cssPresets, 'css_presets');
+                    if (wd.unreadCounts) await wcDb.put('kv_store', wd.unreadCounts, 'unread_counts');
                     
-                    // 清空旧表并写入新数据
                     const stores = ['characters', 'masks', 'moments', 'chats'];
                     for (const store of stores) {
                         const tx = wcDb.instance.transaction([store], 'readwrite');
@@ -2710,6 +2810,18 @@ async function wcTriggerAI(charIdOverride = null) {
             systemPrompt += timeGapPrompt;
         }
 
+        // --- 新增：注入恋人空间实时物理状态同步 ---
+        if (lsState.isLinked && lsState.boundCharId === charId && lsState.locationSyncEnabled) {
+            const distance = (privacyStepCount * 0.7 / 1000).toFixed(2);
+            systemPrompt += `\n【恋人空间 - 实时状态同步 (最高优先级)】\n`;
+            systemPrompt += `用户(User)向你共享了Ta的实时设备数据：\n`;
+            systemPrompt += `- 当前位置：${globalCurrentAddress}\n`;
+            systemPrompt += `- 今日步数：${privacyStepCount} 步\n`;
+            systemPrompt += `- 行走路程：${distance} km\n`;
+            systemPrompt += `(你可以根据这些数据自然地关心Ta，比如发现Ta走了很多路问Ta累不累，或者根据Ta的位置问Ta在干嘛。不要像机器人一样汇报数据，要像真人一样随口提起。)\n`;
+        }
+        // --- 新增结束 ---
+
         systemPrompt += `\n【角色活人运转 (核心心理学)】
 > Personality: HEXACO-driven, 动态性格特征，必须包含内心冲突。
 > Filter: 情绪由认知图式(schema-bias)驱动，拒绝纯条件反射式的机械回复。
@@ -2852,7 +2964,7 @@ JSON 数组中的每个元素代表一条消息、表情包或动作指令。请
             }
             
             if (m.type === 'voice') content = `[语音] ${m.content}`;
-            if (m.type === 'transfer') content = `[转账: ${m.amount}元, 备注: ${m.note}, 状态: ${m.status}]`;
+            if (m.type === 'transfer') content = `[转账: ${m.amount}元,备注: ${m.note}, 状态: ${m.status}]`;
             if (m.type === 'invite') content = `[系统提示: 用户向你发送了“恋人空间”开启邀请。如果同意，请回复“我同意”或类似的话；如果拒绝，请回复拒绝理由。]`;
             
             if (m.type === 'image') {
@@ -5400,6 +5512,7 @@ async function wcSimTriggerAI() {
         const now = new Date();
         const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
+// 找到 wcSimTriggerAI 函数中的这部分代码并替换：
         let prompt = "";
         
         // --- 核心修复：群聊逻辑与碎片化 ---
@@ -5407,7 +5520,7 @@ async function wcSimTriggerAI() {
             prompt += `你正在模拟一个名为【${chat.name}】的微信群聊。\n`;
             prompt += `群聊背景：${chat.desc || '无'}\n`;
             prompt += `群里的人正在跟群成员【${char.name}】(User扮演) 聊天。\n`;
-            prompt += `【任务】：请以群里其他成员的身份回复消息。\n`;
+            prompt += `【任务】：请以群里其他成员的身份回复【${char.name}】的消息。\n`;
             prompt += `【要求】：\n`;
             prompt += `1. 可以是一个人回复，也可以是几个人七嘴八舌。\n`;
             prompt += `2. 必须返回 JSON 数组，每个对象必须包含 "senderName" (发送者名字)。\n`;
@@ -5417,18 +5530,19 @@ async function wcSimTriggerAI() {
             prompt += `你现在扮演角色：${chat.name}。\n`;
             prompt += `你的身份/背景：${chat.desc || '普通朋友'}\n`;
             prompt += `你正在跟【${char.name}】进行微信聊天。\n`;
-            prompt += `【任务】：回复 ${char.name} 的消息。\n`;
+            prompt += `【任务】：回复【${char.name}】的消息。\n`;
             prompt += `【要求】：返回 JSON 数组，格式示例：[{"content":"好的"}]\n`;
         }
         
         prompt += `\n【当前时间】：${timeString}\n`;
-        prompt += `【${char.name} 的人设】：${char.prompt}\n`;
+        prompt += `【注意】：你不是 ${char.name}！你是 ${chat.name}。${char.name} 是正在和你聊天的人，${char.name} 的人设是：${char.prompt}\n`;
         
         // 注入活人运转规则
         prompt += `\n【角色活人运转规则】\n`;
         prompt += `> 必须像真人一样聊天，拒绝机械回复。\n`;
         prompt += `> 必须将长回复拆分成多条短消息（1-4条），严禁把所有话挤在一个气泡里！\n`;
         prompt += `> 【重要约束】：绝对不要凭空捏造没有发生过的事情、没有做过的约定或不存在的剧情。请严格基于现有的聊天记录上下文进行自然的日常问候、吐槽或顺延当前话题。\n`;
+        prompt += `> 【身份约束】：绝对不能以 ${char.name} 的口吻说话！你只能扮演 ${chat.name} (或群成员)！绝对不能虚构 ${char.name} 的回复或动作！\n`;
         prompt += `> 【格式约束】：你必须先输出 <thinking> 标签进行思考，然后再输出 JSON 数组。严禁将一句话强行拆断！\n`;
         
         // 注入最近聊天记录
@@ -6331,6 +6445,7 @@ const lsState = {
     pendingCharId: null, 
     startDate: null, 
     isLinked: false, 
+    locationSyncEnabled: false, // 新增：位置同步状态
     npcFreq: 30, 
     feed: [], 
     npcInterval: null, 
@@ -6359,6 +6474,7 @@ async function lsLoadData() {
         lsState.pendingCharId = data.pendingCharId;
         lsState.startDate = data.startDate;
         lsState.isLinked = data.isLinked || false;
+        lsState.locationSyncEnabled = data.locationSyncEnabled || false; // 新增：读取状态
         lsState.npcFreq = data.npcFreq !== undefined ? data.npcFreq : 30;
         lsState.feed = data.feed || [];
         lsState.widgetEnabled = data.widgetEnabled || false;
@@ -6376,6 +6492,7 @@ async function lsSaveData() {
         pendingCharId: lsState.pendingCharId,
         startDate: lsState.startDate,
         isLinked: lsState.isLinked,
+        locationSyncEnabled: lsState.locationSyncEnabled, // 新增：保存状态
         npcFreq: lsState.npcFreq,
         feed: lsState.feed,
         widgetEnabled: lsState.widgetEnabled,
@@ -6517,6 +6634,10 @@ function lsRenderMain() {
 
     document.getElementById('ls-toggle-link').checked = lsState.isLinked;
     
+    // 新增：渲染位置同步开关状态
+    const toggleLoc = document.getElementById('ls-toggle-location');
+    if (toggleLoc) toggleLoc.checked = lsState.locationSyncEnabled;
+    
     const npcFreqInput = document.getElementById('ls-npc-freq');
     if (npcFreqInput) npcFreqInput.value = lsState.npcFreq;
 
@@ -6571,6 +6692,18 @@ function lsSwitchTab(tabName) {
 function lsToggleLink(checkbox) {
     lsState.isLinked = checkbox.checked;
     lsSaveData();
+}
+
+// 新增：处理位置同步开关
+function lsToggleLocationSync(checkbox) {
+    lsState.locationSyncEnabled = checkbox.checked;
+    lsSaveData();
+    if (checkbox.checked) {
+        // 开启时，主动请求一次运动权限并获取一次位置
+        requestMotionPermission();
+        updateGlobalLocation();
+        alert("已开启同步！对方现在能感知你的步数和位置了。");
+    }
 }
 
 function lsUpdateNpcFreq(val) {
@@ -6910,29 +7043,55 @@ async function lsTriggerNpcMessage() {
         if (npc.type === 'group') {
             prompt += `你正在模拟一个名为【${npc.name}】的微信群聊。\n`;
             prompt += `群聊背景/描述：${npc.desc}\n`;
-            prompt += `群成员正在聊天。请生成 1-3 条群消息。\n`;
+            prompt += `群成员正在聊天。请生成 1-3 条群消息，主动发给群成员【${char.name}】。\n`;
             prompt += `【重要】：你需要扮演群里的不同成员发言。不要扮演“群聊系统”，要扮演具体的人。\n`;
             prompt += `【输出格式】：JSON数组，必须包含 senderName (发言人名字)。\n`;
             prompt += `示例：[{"type":"text", "senderName":"老王", "content":"今晚去哪吃？"}, {"type":"text", "senderName":"小李", "content":"吃火锅吧"}]\n`;
         } else {
             prompt += `你现在扮演角色：${npc.name}。\n`;
             prompt += `你的身份/背景：${npc.desc}\n`;
-            prompt += `你正在给你的熟人【${char.name}】发微信。\n`;
+            prompt += `你正在主动给你的熟人【${char.name}】发微信。\n`;
             prompt += `【输出格式】：JSON数组。\n`;
             prompt += `示例：[{"type":"text", "content":"在吗？"}, {"type":"text", "content":"有个事想跟你说"}]\n`;
         }
         
         prompt += `\n【当前时间】：${timeString} ${dayString}\n`;
-        prompt += `【${char.name} 的人设】：${char.prompt}\n`;
+        prompt += `【注意】：你不是 ${char.name}！你是 ${npc.name}。${char.name} 是接收你消息的人，${char.name} 的人设是：${char.prompt}\n`;
         prompt += `${wbInfo}\n`;
-        prompt += `内容要求：口语化，生活化，符合人设。拒绝油腻和AI味。\n`;
+
+        // 注入最近聊天记录 (防止NPC凭空捏造，让它顺着之前的话题聊)
+        let chat = char.phoneData.chats ? char.phoneData.chats.find(c => c.name === npc.name) : null;
+        if (chat && chat.history && chat.history.length > 0) {
+            prompt += `\n【最近聊天记录】：\n`;
+            const recentHistory = chat.history.slice(-10);
+            recentHistory.forEach(h => {
+                const speaker = h.sender === 'me' ? char.name : (h.name || npc.name);
+                prompt += `${speaker}: ${h.content}\n`;
+            });
+        }
+        
+        // --- 新增：NPC主动发消息时也注入物理状态 ---
+        if (lsState.isLinked && lsState.boundCharId === char.id && lsState.locationSyncEnabled) {
+            const distance = (privacyStepCount * 0.7 / 1000).toFixed(2);
+            prompt += `\n【恋人空间 - 实时状态同步】\n`;
+            prompt += `用户(User)向你共享了Ta的实时设备数据：\n`;
+            prompt += `- 当前位置：${globalCurrentAddress}\n`;
+            prompt += `- 今日步数：${privacyStepCount} 步\n`;
+            prompt += `- 行走路程：${distance} km\n`;
+            prompt += `(你可以以此为话题主动找Ta聊天，比如发现Ta在某个地方，或者今天走了很多路。)\n`;
+        }
+        // --- 新增结束 ---
+
+        prompt += `内容要求：口语化，生活化，符合你（${npc.name}）的人设。拒绝油腻和AI味。\n`;
         
         // 注入活人运转与思维链规则
         prompt += `【角色活人运转规则】\n`;
         prompt += `> 必须像真人一样聊天，拒绝机械回复。\n`;
         prompt += `> 必须将长回复拆分成多条短消息（1-4条），严禁把所有话挤在一个气泡里！\n`;
         prompt += `> 【重要约束】：绝对不要凭空捏造没有发生过的事情、没有做过的约定或不存在的剧情。请严格基于现有的聊天记录上下文进行自然的日常问候、吐槽或顺延当前话题。\n`;
+        prompt += `> 【身份约束】：绝对不能以 ${char.name} 的口吻说话！你只能扮演 ${npc.name} (或群成员)！绝对不能虚构 ${char.name} 的回复或动作！\n`;
         prompt += `> 【格式约束】：你必须先输出 <thinking> 标签进行思考，然后再输出 JSON 数组。严禁将一句话强行拆断！\n`;
+        
 
         const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
             method: 'POST',
@@ -6970,7 +7129,9 @@ async function lsTriggerNpcMessage() {
         if (actions.length === 0) return;
 
         if (!char.phoneData.chats) char.phoneData.chats = [];
-        let chat = char.phoneData.chats.find(c => c.name === npc.name);
+        
+        // 修复：去掉 let，复用上面声明的 chat 变量
+        chat = char.phoneData.chats.find(c => c.name === npc.name);
         
         if (!chat) {
             chat = {
