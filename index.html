@@ -895,6 +895,20 @@
                 </div>
             </div>
         </div>
+        <!-- iOS 风格通用文本编辑弹窗 (新增) -->
+        <div id="wc-modal-ios-text-edit" class="wc-modal hidden" style="z-index: 20000;">
+            <div class="wc-modal-content" style="width: 270px; border-radius: 14px; background: rgba(242,242,242,0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); overflow: hidden;">
+                <div style="padding: 20px 16px 15px 16px; text-align: center;">
+                    <h3 id="wc-ios-edit-title" style="margin: 0 0 10px 0; font-size: 17px; font-weight: 600; color: #000;">编辑内容</h3>
+                    <div style="font-size: 13px; color: #000; margin-bottom: 10px;" id="wc-ios-edit-desc"></div>
+                    <textarea id="wc-ios-edit-input" style="width: 100%; height: 100px; border: 0.5px solid rgba(0,0,0,0.1); border-radius: 5px; padding: 8px; font-size: 14px; resize: none; background: #fff; font-family: inherit; -webkit-appearance: none; outline: none;"></textarea>
+                </div>
+                <div style="display: flex; border-top: 0.5px solid rgba(60,60,67,0.29);">
+                    <button onclick="wcCloseModal('wc-modal-ios-text-edit')" style="flex: 1; padding: 12px; background: transparent; border: none; border-right: 0.5px solid rgba(60,60,67,0.29); font-size: 17px; color: #007AFF; cursor: pointer; font-weight: 400;">取消</button>
+                    <button id="wc-ios-edit-confirm" style="flex: 1; padding: 12px; background: transparent; border: none; font-size: 17px; font-weight: 600; color: #007AFF; cursor: pointer;">确定</button>
+                </div>
+            </div>
+        </div>
 
         <!-- 存储分析弹窗 -->
         <div class="custom-modal-overlay" id="storageModalOverlay">
@@ -1785,18 +1799,27 @@
             </div>
         </div>
 
-        <!-- 通讯录好友详情卡片 -->
+         <!-- 通讯录好友详情卡片 (修复版：支持长文本滚动) -->
         <div id="wc-modal-phone-contact-card" class="wc-modal hidden" style="z-index: 12000; align-items: center; justify-content: center; display: flex;">
-            <div class="wc-modal-content" style="width: 280px; height: 360px; padding: 0; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; position: relative;">
-                <button class="wc-close-btn" onclick="wcCloseModal('wc-modal-phone-contact-card')" style="position: absolute; top: 10px; right: 10px; z-index: 10;">&times;</button>
-                <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; background: #fff;">
-                    <div id="wc-card-contact-avatar" style="width: 80px; height: 80px; border-radius: 8px; background: #eee; margin-bottom: 15px; overflow: hidden;"></div>
-                    <div class="wc-contact-card-name" id="wc-card-contact-name" style="font-size: 22px; font-weight: 600; color: #000;">Name</div>
-                    <div id="wc-card-contact-desc" style="font-size: 13px; color: #888; margin-top: 8px; text-align: center; padding: 0 10px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">Desc</div>
+            <div class="wc-modal-content" style="width: 280px; height: auto; max-height: 80vh; padding: 0; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; position: relative; background: #fff;">
+                
+                <!-- 关闭按钮 -->
+                <button class="wc-close-btn" onclick="wcCloseModal('wc-modal-phone-contact-card')" style="position: absolute; top: 10px; right: 10px; z-index: 10; background: rgba(255,255,255,0.8); border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">&times;</button>
+                
+                <!-- 中间信息区域 (可滚动) -->
+                <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: 30px 20px 20px 20px; min-height: 150px;">
+                    <div id="wc-card-contact-avatar" style="width: 80px; height: 80px; border-radius: 8px; background: #eee; margin-bottom: 15px; overflow: hidden; flex-shrink: 0;"></div>
+                    <div class="wc-contact-card-name" id="wc-card-contact-name" style="font-size: 22px; font-weight: 600; color: #000; text-align: center; margin-bottom: 8px;">Name</div>
+                    
+                    <!-- 简介文本：移除行数限制，允许完整显示 -->
+                    <div id="wc-card-contact-desc" style="font-size: 13px; color: #888; text-align: center; padding: 0 5px; line-height: 1.5; word-wrap: break-word; width: 100%;">Desc</div>
                 </div>
-                <div id="wc-card-contact-actions" style="padding: 20px; background: #F7F7F7; border-top: 1px solid #eee; display: flex; flex-direction: column; gap: 10px;">
+
+                <!-- 底部按钮区域 (固定在底部) -->
+                <div id="wc-card-contact-actions" style="padding: 20px; background: #F7F7F7; border-top: 1px solid #eee; display: flex; flex-direction: column; gap: 10px; flex-shrink: 0;">
                     <button class="wc-ios-btn-block" style="background: #07C160; color: white; height: 40px; font-size: 14px;" onclick="wcShareContactToMain()">添加至列表</button>
                     <button class="wc-ios-btn-block" style="background: #fff; color: #000; border: 1px solid #ddd; height: 40px; font-size: 14px;" onclick="wcOpenShareCardModal()">分享名片</button>
+                    <!-- 编辑按钮会由 JS 动态插入到这里 -->
                     <button class="wc-ios-btn-block" style="background: transparent; color: #FA5151; height: 30px; font-size: 14px; margin-top: 5px;" onclick="wcDeletePhoneContact()">删除好友</button>
                 </div>
             </div>
