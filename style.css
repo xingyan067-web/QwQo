@@ -1266,3 +1266,33 @@ button.action-btn.destructive { background-color: #ff3b30; color: white; margin-
 .ins-group-delete:active {
     background: rgba(255, 59, 48, 0.2);
 }
+/* iOS 风格文本编辑弹窗专用样式 */
+#wc-modal-ios-text-edit .wc-modal-content {
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+}
+
+#wc-ios-edit-input:focus {
+    border-color: #007AFF !important;
+    background: #fff !important;
+}
+
+/* 适配深色模式 (如果需要) */
+@media (prefers-color-scheme: dark) {
+    #wc-modal-ios-text-edit .wc-modal-content {
+        background: rgba(30,30,30,0.95) !important;
+    }
+    #wc-ios-edit-title, #wc-ios-edit-desc {
+        color: #fff !important;
+    }
+    #wc-ios-edit-input {
+        background: #2c2c2e !important;
+        color: #fff !important;
+        border-color: rgba(255,255,255,0.1) !important;
+    }
+    #wc-modal-ios-text-edit button {
+        border-color: rgba(255,255,255,0.15) !important;
+    }
+    #wc-modal-ios-text-edit div[style*="border-top"] {
+        border-top-color: rgba(255,255,255,0.15) !important;
+    }
+}
