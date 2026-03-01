@@ -42,38 +42,6 @@ let privacyStepCount = parseInt(localStorage.getItem('ios_theme_steps')) || 0;
 let privacyLastDate = localStorage.getItem('ios_theme_step_date') || new Date().toDateString();
 let privacyLastMotionTime = 0;
 let isMotionListenerAdded = false;
-// 新增：地图与实时定位变量
-let privacyMap = null;
-let privacyMarker = null;
-let privacyWatchId = null;
-
-// 新增：全局位置缓存，供 AI 随时读取
-let globalCurrentAddress = "未知位置";
-
-// 新增：后台静默获取一次位置（不显示地图，只拿数据）
-function updateGlobalLocation() {
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(async (pos) => {
-            const lat = pos.coords.latitude;
-            const lon = pos.coords.longitude;
-            try {
-                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`, {
-                    headers: { 'Accept-Language': 'zh-CN' }
-                });
-                const data = await res.json();
-                let address = data.display_name;
-                if (data.address) {
-                    const a = data.address;
-                    address = `${a.city || a.town || a.province || ''} ${a.suburb || a.county || ''} ${a.road || ''}`.trim();
-                    if (!address) address = data.display_name;
-                }
-                globalCurrentAddress = address || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-            } catch (e) {
-                globalCurrentAddress = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-            }
-        }, () => {}, { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 });
-    }
-}
 
 // 检查是否是新的一天，如果是则步数清零
 function checkNewDay() {
@@ -559,11 +527,6 @@ function openPrivacySettings() {
 
 function closePrivacySettings() {
     document.getElementById('privacySettingsModal').classList.remove('open');
-    // 新增：关闭页面时停止高频实时定位，节省手机电量
-    if (privacyWatchId !== null && navigator.geolocation) {
-        navigator.geolocation.clearWatch(privacyWatchId);
-        privacyWatchId = null;
-    }
 }
 
 function updatePrivacyUI() {
@@ -601,8 +564,8 @@ function handleMotion(event) {
     const magnitude = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
     const curTime = Date.now();
     
-    // 当幅度大于 12.5 (表示有明显的走动震动)，且距离上次计步超过 300ms (防抖)
-    if (magnitude > 12.5 && (curTime - privacyLastMotionTime) > 300) {
+    // 当幅度大于 11.5 (表示有明显的走动震动)，且距离上次计步超过 300ms (防抖)
+    if (magnitude > 11.5 && (curTime - privacyLastMotionTime) > 300) {
         checkNewDay();
         privacyStepCount++;
         localStorage.setItem('ios_theme_steps', privacyStepCount);
@@ -616,44 +579,17 @@ function fetchLocation() {
     locEl.innerText = "高精度定位中...";
     
     if (navigator.geolocation) {
-        // 如果之前有监听，先清除
-        if (privacyWatchId !== null) {
-            navigator.geolocation.clearWatch(privacyWatchId);
-        }
-        
-        // 使用 watchPosition 实时追踪真实位置
-        privacyWatchId = navigator.geolocation.watchPosition(async (pos) => {
+        navigator.geolocation.getCurrentPosition(async (pos) => {
             const lat = pos.coords.latitude;
             const lon = pos.coords.longitude;
-            
-            // --- 新增：初始化或更新地图 ---
-            if (!privacyMap) {
-                // 初始化地图，缩放级别为 16
-                privacyMap = L.map('privacyMap').setView([lat, lon], 16);
-                // 使用免费的 OpenStreetMap 图层
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap'
-                }).addTo(privacyMap);
-                // 添加位置标记
-                privacyMarker = L.marker([lat, lon]).addTo(privacyMap);
-                
-                // 修复：在隐藏的 div 中初始化地图可能导致显示不全，延迟刷新尺寸
-                setTimeout(() => {
-                    privacyMap.invalidateSize();
-                }, 400);
-            } else {
-                // 如果地图已存在，平滑移动到新位置并更新标记
-                privacyMap.setView([lat, lon]);
-                privacyMarker.setLatLng([lat, lon]);
-            }
-
-            // --- 原有的：获取中文城市街道地址 ---
             try {
+                // 使用 OpenStreetMap 获取中文高精度地址
                 const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`, {
                     headers: { 'Accept-Language': 'zh-CN' }
                 });
                 const data = await res.json();
                 
+                // 提取精简的街道地址
                 let address = data.display_name;
                 if (data.address) {
                     const a = data.address;
@@ -662,17 +598,15 @@ function fetchLocation() {
                 }
                 
                 locEl.innerText = address || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-                globalCurrentAddress = locEl.innerText; // 新增：同步给全局变量
             } catch (e) {
                 locEl.innerText = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-                globalCurrentAddress = locEl.innerText; // 新增：同步给全局变量
             }
         }, (err) => {
             locEl.innerText = "定位失败或未授权";
         }, {
-            enableHighAccuracy: true, // 强制开启高精度 GPS
+            enableHighAccuracy: true, // 开启高精度 GPS
             timeout: 10000,
-            maximumAge: 0 // 拒绝使用缓存位置，必须是真实当前位置
+            maximumAge: 0
         });
     } else {
         locEl.innerText = "设备不支持定位";
@@ -690,19 +624,10 @@ async function analyzeStorage() {
         '预设库': ['ios_theme_presets'],
         '系统设置': ['ios_theme_settings', 'ios_theme_api_config', 'ios_theme_layout']
     };
-    const colors = { 
-        '世界书': '#007aff', 
-        '图片/媒体': '#ff9500', 
-        '预设库': '#e2d6f5', 
-        '系统设置': '#8e8e93',
-        'WeChat数据': '#07c160', // 微信绿
-        '情侣空间': '#ff9a9e'    // 恋爱粉
-    };
-    
+    const colors = { '世界书': '#007aff', '图片/媒体': '#ff9500', '预设库': '#34c759', '系统设置': '#8e8e93' };
     let usage = {};
     let totalBytes = 0;
 
-    // 1. 统计 Theme Studio (idb) 的基础数据
     for (let category in keys) {
         usage[category] = 0;
         for (let key of keys[category]) {
@@ -715,31 +640,6 @@ async function analyzeStorage() {
         totalBytes += usage[category];
     }
 
-    // 2. 统计情侣空间数据 (idb)
-    const lsData = await idb.get('ls_data');
-    usage['情侣空间'] = lsData ? JSON.stringify(lsData).length : 0;
-    totalBytes += usage['情侣空间'];
-
-    // 3. 统计 WeChat 数据 (wcDb)
-    let wechatSize = 0;
-    try {
-        const wcStores = ['characters', 'chats', 'moments', 'masks'];
-        for (let store of wcStores) {
-            const data = await wcDb.getAll(store);
-            wechatSize += JSON.stringify(data || []).length;
-        }
-        const kvKeys = ['user', 'wallet', 'sticker_categories', 'css_presets', 'unread_counts'];
-        for (let key of kvKeys) {
-            const data = await wcDb.get('kv_store', key);
-            if (data) wechatSize += JSON.stringify(data).length;
-        }
-    } catch (e) {
-        console.error("读取 WeChat 存储大小失败", e);
-    }
-    usage['WeChat数据'] = wechatSize;
-    totalBytes += wechatSize;
-
-    // 绘制图表
     const canvas = document.getElementById('storageChart');
     const ctx = canvas.getContext('2d');
     const centerX = canvas.width / 2;
@@ -841,14 +741,13 @@ async function exportAllData() {
         }
     }
 
-    // 2. 导出 WeChat 数据 (包含 char 的手机数据)
+    // 2. 导出 WeChat 数据
     const wechatData = {};
     wechatData.user = await wcDb.get('kv_store', 'user');
     wechatData.wallet = await wcDb.get('kv_store', 'wallet');
     wechatData.stickerCategories = await wcDb.get('kv_store', 'sticker_categories');
     wechatData.cssPresets = await wcDb.get('kv_store', 'css_presets');
-    wechatData.unreadCounts = await wcDb.get('kv_store', 'unread_counts'); // 补充未读消息
-    wechatData.characters = await wcDb.getAll('characters'); // 这里天然包含了 phoneData 和 phoneConfig
+    wechatData.characters = await wcDb.getAll('characters');
     wechatData.masks = await wcDb.getAll('masks');
     wechatData.moments = await wcDb.getAll('moments');
     
@@ -881,11 +780,12 @@ function importAllData(input) {
     reader.onload = async function(e) {
         try {
             const json = JSON.parse(e.target.result);
+            // 兼容旧版备份签名
             if (json.signature !== 'ios_theme_studio_backup' && json.signature !== 'ios_theme_studio_full_backup') {
                 return alert("导入失败：文件格式不正确。");
             }
             
-            if (confirm("这将覆盖当前所有数据（包括聊天记录和对方手机数据），确定要恢复吗？")) {
+            if (confirm("这将覆盖当前所有数据（包括聊天记录），确定要恢复吗？")) {
                 const data = json.data;
                 
                 // 1. 恢复 Theme Studio 数据
@@ -895,15 +795,15 @@ function importAllData(input) {
                     }
                 }
 
-                // 2. 恢复 WeChat 数据
+                // 2. 恢复 WeChat 数据 (如果存在)
                 if (data['wechat_backup']) {
                     const wd = data['wechat_backup'];
                     if (wd.user) await wcDb.put('kv_store', wd.user, 'user');
                     if (wd.wallet) await wcDb.put('kv_store', wd.wallet, 'wallet');
                     if (wd.stickerCategories) await wcDb.put('kv_store', wd.stickerCategories, 'sticker_categories');
                     if (wd.cssPresets) await wcDb.put('kv_store', wd.cssPresets, 'css_presets');
-                    if (wd.unreadCounts) await wcDb.put('kv_store', wd.unreadCounts, 'unread_counts');
                     
+                    // 清空旧表并写入新数据
                     const stores = ['characters', 'masks', 'moments', 'chats'];
                     for (const store of stores) {
                         const tx = wcDb.instance.transaction([store], 'readwrite');
@@ -2450,16 +2350,6 @@ function wcRenderMessages(charId) {
         if (msg.type === 'system') {
             row.className = 'wc-message-row system';
             row.innerHTML = `<div class="wc-system-msg-text ${msg.style || ''}">${msg.content}</div>`;
-            
-            // --- 新增：给系统消息绑定长按/右键事件，以便删除 ---
-            row.addEventListener('touchstart', (e) => wcHandleTouchStart(e, msg.id));
-            row.addEventListener('touchend', wcHandleTouchEnd);
-            row.addEventListener('contextmenu', (e) => {
-                e.preventDefault();
-                wcShowContextMenu(e.clientX, e.clientY, msg.id);
-            });
-            // -------------------------------------------------
-
             container.insertBefore(row, anchor);
             return;
         }
@@ -2569,19 +2459,13 @@ function wcRenderMessages(charId) {
 }
 
 function wcScrollToBottom(force = false) {
-    const detailView = document.getElementById('wc-view-chat-detail');
-    // 核心修复：如果当前不在聊天界面，绝对不要执行滚动，防止引起页面闪烁跳动
-    if (!detailView || !detailView.classList.contains('active')) {
-        return;
-    }
-
     const area = document.getElementById('wc-chat-messages');
     const anchor = document.getElementById('wc-chat-scroll-anchor');
     
     requestAnimationFrame(() => {
         if (anchor) {
             anchor.scrollIntoView({ behavior: force ? "auto" : "smooth", block: "end" });
-        } else if (area) {
+        } else {
             area.scrollTop = area.scrollHeight;
         }
     });
@@ -2656,14 +2540,12 @@ function wcHandleEdit() {
     const msgs = wcState.chats[wcState.activeChatId];
     const msg = msgs.find(m => m.id === wcState.selectedMsgId);
     if (msg) {
-        // 使用新的 iOS 弹窗替代 prompt
-        wcOpenIOSTextEdit("编辑消息", "修改聊天内容", msg.content, (newText) => {
-            if (newText !== null && newText.trim() !== "") {
-                msg.content = newText;
-                wcSaveData();
-                wcRenderMessages(wcState.activeChatId);
-            }
-        });
+        const newText = prompt("编辑消息内容:", msg.content);
+        if (newText !== null && newText.trim() !== "") {
+            msg.content = newText;
+            wcSaveData();
+            wcRenderMessages(wcState.activeChatId);
+        }
     }
     wcHideContextMenu();
 }
@@ -2828,18 +2710,6 @@ async function wcTriggerAI(charIdOverride = null) {
             systemPrompt += timeGapPrompt;
         }
 
-        // --- 新增：注入恋人空间实时物理状态同步 ---
-        if (lsState.isLinked && lsState.boundCharId === charId && lsState.locationSyncEnabled) {
-            const distance = (privacyStepCount * 0.7 / 1000).toFixed(2);
-            systemPrompt += `\n【恋人空间 - 实时状态同步 (最高优先级)】\n`;
-            systemPrompt += `用户(User)向你共享了Ta的实时设备数据：\n`;
-            systemPrompt += `- 当前位置：${globalCurrentAddress}\n`;
-            systemPrompt += `- 今日步数：${privacyStepCount} 步\n`;
-            systemPrompt += `- 行走路程：${distance} km\n`;
-            systemPrompt += `(你可以根据这些数据自然地关心Ta，比如发现Ta走了很多路问Ta累不累，或者根据Ta的位置问Ta在干嘛。不要像机器人一样汇报数据，要像真人一样随口提起。)\n`;
-        }
-        // --- 新增结束 ---
-
         systemPrompt += `\n【角色活人运转 (核心心理学)】
 > Personality: HEXACO-driven, 动态性格特征，必须包含内心冲突。
 > Filter: 情绪由认知图式(schema-bias)驱动，拒绝纯条件反射式的机械回复。
@@ -2982,7 +2852,7 @@ JSON 数组中的每个元素代表一条消息、表情包或动作指令。请
             }
             
             if (m.type === 'voice') content = `[语音] ${m.content}`;
-            if (m.type === 'transfer') content = `[转账: ${m.amount}元,备注: ${m.note}, 状态: ${m.status}]`;
+            if (m.type === 'transfer') content = `[转账: ${m.amount}元, 备注: ${m.note}, 状态: ${m.status}]`;
             if (m.type === 'invite') content = `[系统提示: 用户向你发送了“恋人空间”开启邀请。如果同意，请回复“我同意”或类似的话；如果拒绝，请回复拒绝理由。]`;
             
             if (m.type === 'image') {
@@ -4648,8 +4518,7 @@ function wcStopPhoneClock() {
 function wcUpdatePhoneClock() {
     const now = new Date();
     const hours = now.getHours().toString().padStart(2, '0');
-    const minutes = now.getMinutes().toString().padStart(
-   2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
     document.getElementById('wc-sim-clock-time').innerText = `${hours}:${minutes}`;
     const days = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
     document.getElementById('wc-sim-clock-date').innerText = `${now.getMonth() + 1}月${now.getDate()}日 ${days[now.getDay()]}`;
@@ -4749,6 +4618,7 @@ function wcSwitchPhoneTab(tab) {
         wcRenderPhoneContacts();
     } else if (tab === 'me') {
         headerTitle.innerText = '我';
+        // 核心修改：在左上角增加一键破解按钮
         headerLeft.innerHTML = `<div onclick="wcGeneratePrivacyAndFavorites()" style="cursor: pointer; display: flex; align-items: center; font-size: 14px; color: #007AFF;"><svg class="wc-icon" viewBox="0 0 24 24" style="width: 16px; height: 16px; margin-right: 4px;"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 1 0 2.13-5.85L2 9"></path></svg>一键破解</div>`;
         wcRenderPhoneMe();
     }
@@ -4762,7 +4632,8 @@ function wcRenderPhoneMe() {
     const profile = char.phoneData && char.phoneData.profile ? char.phoneData.profile : { nickname: char.name, sign: "暂无签名" };
 
     content.innerHTML = `
-        <div style="background: #fff; padding: 30px 20px; display: flex; align-items: center; margin-bottom: 10px;">
+        <div style="background: #fff; padding: 30px 20px; display: flex; align-items: center; margin-bottom: 10px
+;">
             <img src="${char.avatar}" style="width: 64px; height: 64px; border-radius: 8px; margin-right: 16px; object-fit: cover;">
             <div style="flex: 1;">
                 <div style="font-size: 20px; font-weight: 600; margin-bottom: 4px;">${profile.nickname}</div>
@@ -4782,6 +4653,7 @@ function wcRenderPhoneMe() {
         </div>
         
         <div class="wc-list-group" style="margin-top: 10px;">
+            <!-- 新增：收藏 -->
             <div class="wc-list-item" onclick="wcOpenPhoneFavorites()" style="background: #fff; border-bottom: 0.5px solid #E5E5EA;">
                 <svg class="wc-icon" style="margin-right: 10px; color: #FFC107;" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
                 <div class="wc-item-content">
@@ -4807,6 +4679,437 @@ function wcRenderPhoneMe() {
     `;
 }
 
+// --- Phone Privacy Logic (New) ---
+function wcOpenPhonePrivacy() {
+    document.getElementById('wc-phone-app-privacy').style.display = 'flex';
+    wcRenderPhonePrivacyContent();
+}
+
+function wcClosePhonePrivacy() {
+    document.getElementById('wc-phone-app-privacy').style.display = 'none';
+}
+
+function wcRenderPhonePrivacyContent() {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    const content = document.getElementById('wc-phone-privacy-content');
+    if (!char) return;
+
+    const privacyData = (char.phoneData && char.phoneData.privacy) ? char.phoneData.privacy : null;
+
+    if (!privacyData) {
+        content.innerHTML = '<div style="padding: 40px 20px; text-align: center; color: #8E8E93; font-size: 14px;">点击左上角「刷新」<br>偷偷查看 Ta 的私密记录...</div>';
+        return;
+    }
+
+    content.innerHTML = `
+        <div style="background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.05);">
+            <div style="font-size: 18px; font-weight: 600; margin-bottom: 15px; color: #FF3B30; display: flex; align-items: center; gap: 8px;">
+                <svg class="wc-icon" viewBox="0 0 24 24" style="width: 20px; height: 20px; stroke: currentColor;"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                私密记录
+            </div>
+            <div style="margin-bottom: 12px;">
+                <span style="font-size: 13px; color: #8E8E93;">时间：</span>
+                <span style="font-size: 15px; color: #333;">${privacyData.time}</span>
+            </div>
+            <div style="margin-bottom: 12px;">
+                <span style="font-size: 13px; color: #8E8E93;">状态：</span>
+                <span style="font-size: 15px; color: #333;">${privacyData.status}</span>
+            </div>
+            <div style="margin-bottom: 12px;">
+                <div style="font-size: 13px; color: #8E8E93; margin-bottom: 4px;">动作描述：</div>
+                <div style="font-size: 15px; color: #333; line-height: 1.5; background: #F9F9F9; padding: 10px; border-radius: 8px;">${privacyData.action}</div>
+            </div>
+            <div>
+                <div style="font-size: 13px; color: #8E8E93; margin-bottom: 4px;">内心感受：</div>
+                <div style="font-size: 15px; color: #333; line-height: 1.5; background: #F9F9F9; padding: 10px; border-radius: 8px;">${privacyData.feeling}</div>
+            </div>
+        </div>
+    `;
+}
+
+async function wcGeneratePhonePrivacy() {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    if (!char) return;
+
+    const apiConfig = await idb.get('ios_theme_api_config');
+    if (!apiConfig || !apiConfig.key) return alert("请先配置 API");
+
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) {
+        wcShowError("已达到API调用上限");
+        return;
+    }
+    sessionApiCallCount++;
+
+    wcShowLoading("正在破解私密空间...");
+
+    try {
+        const realMsgs = wcState.chats[char.id] || [];
+        const recentMsgs = realMsgs.slice(-30).map(m => `${m.sender==='me'?'User':char.name}: ${m.content}`).join('\n');
+        const chatConfig = char.chatConfig || {};
+        const userPersona = chatConfig.userPersona || wcState.user.persona || "无";
+
+        let wbInfo = "";
+        if (worldbookEntries.length > 0) {
+            const linkedIds = chatConfig.worldbookEntries || [];
+            const linkedEntries = worldbookEntries.filter(e => linkedIds.includes(e.id.toString()));
+            const entriesToUse = linkedEntries.length > 0 ? linkedEntries : worldbookEntries.slice(0, 10);
+            wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
+        }
+
+        const now = new Date();
+        const timeString = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
+        const timePrompt = `\n【绝对时间基准】：当前现实时间是 ${timeString} ${dayString}。你生成的所有数据（包括时间戳、事件状态等）必须严格符合这个当前时间！绝对不能出现未来的时间，且早中晚的逻辑必须自洽。\n`;
+
+        let prompt = `你扮演角色：${char.name}。\n`;
+        prompt += timePrompt;
+        prompt += `人设：${char.prompt}\n${wbInfo}\n`;
+        prompt += `【用户(User)设定】：${userPersona}\n`;
+        prompt += `【核心场景设定】：我（User）现在正在偷偷查看你（${char.name}）手机上的私密记录APP。\n`;
+        prompt += `【最近我们的聊天记录（20-30条）】：\n${recentMsgs}\n\n`;
+        
+        prompt += `请基于你的人设、我的设定，以及我们**最近的聊天上下文**，生成你最近一次的【私密自慰记录】。\n`;
+        prompt += `【要求】：\n`;
+        prompt += `1. 内容必须高度贴合最近的聊天内容（例如：如果聊天中我在欺负你，你的记录里可能会充满委屈和渴望；如果我们在暧昧，记录里可能满脑子都是我）。\n`;
+        prompt += `2. 描写要富有沉浸感、细腻、符合角色性格。\n`;
+        prompt += `3. 返回纯 JSON 对象，格式如下：\n`;
+        prompt += `{
+          "time": "昨晚深夜 / 刚刚",
+          "status": "简短的状态概括，如：极度渴望、边哭边弄等",
+          "action": "具体的动作描述，你是如何触碰自己的，用了什么物品，或者看着什么东西（比如我的照片/聊天记录）",
+          "feeling": "详细的内心感受，对User的情感，身体的反应等"
+        }\n`;
+
+        const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.key}` },
+            body: JSON.stringify({
+                model: apiConfig.model,
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.8
+            })
+        });
+
+        const data = await response.json();
+        let content = data.choices[0].message.content;
+        content = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+        content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+        const privacyData = JSON.parse(content);
+
+        if (!char.phoneData) char.phoneData = {};
+        char.phoneData.privacy = privacyData;
+        wcSaveData();
+
+        wcRenderPhonePrivacyContent();
+        wcShowSuccess("破解成功");
+
+    } catch (e) {
+        console.error(e);
+        wcShowError("生成失败");
+    }
+}
+
+function wcOpenPhoneWallet() {
+    document.getElementById('wc-phone-app-wallet').style.display = 'flex';
+    wcRenderPhoneWalletContent();
+}
+
+function wcClosePhoneWallet() {
+    document.getElementById('wc-phone-app-wallet').style.display = 'none';
+}
+
+function wcRenderPhoneWalletContent() {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    const content = document.getElementById('wc-phone-wallet-content');
+    if (!char) return;
+
+    const wallet = (char.phoneData && char.phoneData.wallet) ? char.phoneData.wallet : { balance: 0.00, transactions: [] };
+
+    let transHtml = '';
+    if (wallet.transactions && wallet.transactions.length > 0) {
+        wallet.transactions.forEach(t => {
+            const isIncome = t.type === 'income';
+            const sign = isIncome ? '+' : '-';
+            const colorClass = isIncome ? 'wc-amount-in' : 'wc-amount-out';
+            transHtml += `
+                <div class="wc-transaction-item">
+                    <div class="wc-trans-info">
+                        <div class="wc-trans-title">${t.note}</div>
+                        <div class="wc-trans-time">${t.time}</div>
+                    </div>
+                    <div class="wc-trans-amount ${colorClass}">${sign}${parseFloat(t.amount).toFixed(2)}</div>
+                </div>
+            `;
+        });
+    } else {
+        transHtml = '<div style="padding: 20px; text-align: center; color: #8E8E93;">暂无交易记录</div>';
+    }
+
+    content.innerHTML = `
+        <div class="wc-wallet-header" style="padding: 30px 20px; margin-bottom: 10px; background: #07C160; color: white;">
+            <svg class="wc-icon wc-wallet-icon-lg" style="color: white;" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
+            <div class="wc-wallet-balance-label" style="color: rgba(255,255,255,0.8);">当前余额 (元)</div>
+            <div class="wc-wallet-balance-num" style="color: white;">${parseFloat(wallet.balance).toFixed(2)}</div>
+        </div>
+        <div class="wc-list-group-title" style="padding: 0 16px 8px; color: var(--wc-text-secondary); font-size: 13px;">交易记录</div>
+        <div style="background: #fff;">
+            ${transHtml}
+        </div>
+    `;
+}
+
+async function wcGenerateCharWallet() {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    if (!char) return;
+
+    const apiConfig = await idb.get('ios_theme_api_config');
+    if (!apiConfig || !apiConfig.key) return alert("请先配置 API");
+
+    // 检查限制
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) {
+        wcShowError("已达到API调用上限");
+        return;
+    }
+    sessionApiCallCount++;
+
+    wcShowLoading("正在生成钱包数据...");
+
+    try {
+        const chatConfig = char.chatConfig || {};
+        const userPersona = chatConfig.userPersona || wcState.user.persona || "无";
+        
+        let wbInfo = "";
+        if (worldbookEntries.length > 0) {
+            const linkedIds = chatConfig.worldbookEntries || [];
+            const linkedEntries = worldbookEntries.filter(e => linkedIds.includes(e.id.toString()));
+            const entriesToUse = linkedEntries.length > 0 ? linkedEntries : worldbookEntries.slice(0, 10);
+            
+            wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
+        }
+
+        const msgs = wcState.chats[char.id] || [];
+        const recentMsgs = msgs.slice(-20).map(m => `${m.sender==='me'?'User':char.name}: ${m.content}`).join('\n');
+
+        const now = new Date();
+        const timeString = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
+        const timePrompt = `\n【绝对时间基准】：当前现实时间是 ${timeString} ${dayString}。你生成的交易记录时间(time)必须在当前时间之前，且符合常理（如凌晨3点通常不会有早餐店消费）。\n`;
+
+        let prompt = `你扮演角色：${char.name}。\n`;
+        prompt += timePrompt;
+        prompt += `人设：${char.prompt}\n${wbInfo}\n`;
+        prompt += `【用户(User)设定】：${userPersona}\n`;
+        prompt += `【最近聊天记录】：\n${recentMsgs}\n\n`;
+        
+        prompt += `请根据角色的人设、职业、近期经历以及聊天记录，生成该角色的微信钱包数据。\n`;
+        prompt += `【要求】：\n`;
+        prompt += `1. 生成合理的余额 (balance)。\n`;
+        prompt += `2. 生成 5 条最近的交易记录 (transactions)。\n`;
+        prompt += `3. 交易记录必须符合角色生活轨迹 (例如：购物、餐饮、转账、工资等)。\n`;
+        prompt += `4. 返回纯 JSON 对象，格式如下：\n`;
+        prompt += `{
+  "balance": 1234.56,
+  "transactions": [
+    {"type": "expense", "amount": 25.00, "note": "便利店", "time": "10-24 08:30"},
+    {"type": "income", "amount": 5000.00, "note": "工资", "time": "10-15 10:00"}
+  ]
+}\n`;
+        prompt += `注意：type 只能是 'income' (收入) 或 'expense' (支出)。time 格式为简短日期。\n`;
+
+        const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.key}` },
+            body: JSON.stringify({
+                model: apiConfig.model,
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.7
+            })
+        });
+
+        const data = await response.json();
+        let content = data.choices[0].message.content;
+        content = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+        content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+        const walletData = JSON.parse(content);
+
+        if (!char.phoneData) char.phoneData = {};
+        char.phoneData.wallet = walletData;
+        wcSaveData();
+
+        wcRenderPhoneWalletContent();
+        wcShowSuccess("钱包生成成功");
+
+    } catch (e) {
+        console.error(e);
+        wcShowError("生成失败");
+    }
+}
+
+// --- Phone Settings Logic ---
+async function wcGeneratePhoneSettings(renderOnly = false) {
+    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
+    const content = document.getElementById('wc-phone-settings-content');
+    if (!char) return;
+
+    if (renderOnly) {
+        const settings = char.phoneData && char.phoneData.settings ? char.phoneData.settings : { battery: 80, screenTime: "4小时20分", appUsage: [], locations: [] };
+        renderSettingsUI(settings);
+        return;
+    }
+
+    const apiConfig = await idb.get('ios_theme_api_config');
+    if (!apiConfig || !apiConfig.key) return alert("请先配置 API");
+
+    // 检查限制
+    const limit = apiConfig.limit || 50;
+    if (limit > 0 && sessionApiCallCount >= limit) {
+        wcShowError("已达到API调用上限");
+        return;
+    }
+    sessionApiCallCount++;
+
+    wcShowLoading("正在生成手机状态...");
+
+    try {
+        const chatConfig = char.chatConfig || {};
+        const userPersona = chatConfig.userPersona || wcState.user.persona || "无";
+        const msgs = wcState.chats[char.id] || [];
+        const recentMsgs = msgs.slice(-15).map(m => `${m.sender==='me'?'User':char.name}: ${m.content}`).join('\n');
+
+        let wbInfo = "";
+        if (worldbookEntries.length > 0) {
+            const linkedIds = chatConfig.worldbookEntries || [];
+            const linkedEntries = worldbookEntries.filter(e => linkedIds.includes(e.id.toString()));
+            const entriesToUse = linkedEntries.length > 0 ? linkedEntries : worldbookEntries.slice(0, 10);
+            wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
+        }
+
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        const date = now.getDate();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        const timeString = `${year}年${month}月${date}日 ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
+
+        let prompt = `你扮演角色：${char.name}。\n人设：${char.prompt}\n${wbInfo}\n`;
+        prompt += `【当前现实时间】：${timeString} ${dayString}\n请务必具备时间观念，生成的行程和应用使用情况必须符合当前的时间点。\n\n`;
+        prompt += `【用户(User)设定】：${userPersona}\n`;
+        prompt += `【最近聊天记录】：\n${recentMsgs}\n\n`;
+        prompt += `请根据角色的人设、生活习惯以及最近的聊天内容，生成该角色当前的手机状态数据。\n`;
+        prompt += `要求返回 JSON 格式，包含以下字段：\n`;
+        prompt += `1. "battery": 当前电量 (0-100的整数)。\n`;
+        prompt += `2. "screenTime": 今日屏幕使用时长 (例如 "5小时30分")。\n`;
+        prompt += `3. "appUsage": 3到10个应用的今日使用时长列表 (name, time)。\n`;
+        prompt += `4. "locations": 3到10个今日的行程/位置记录 (time, place, desc)。\n`;
+        prompt += `JSON 格式示例：\n`;
+        prompt += `{
+  "battery": 65,
+  "screenTime": "5小时30分",
+  "appUsage": [
+    {"name": "微信", "time": "2小时"},
+    {"name": "抖音", "time": "1小时"},
+    {"name": "王者荣耀", "time": "1.5小时"}
+  ],
+  "locations": [
+    {"time": "08:00", "place": "家", "desc": "起床洗漱"},
+    {"time": "09:00", "place": "公司", "desc": "到达公司开始工作"},
+    {"time": "12:30", "place": "便利店", "desc": "购买午餐"}
+  ]
+}`;
+
+        const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.key}` },
+            body: JSON.stringify({
+                model: apiConfig.model,
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.7
+            })
+        });
+
+        const data = await response.json();
+        let contentStr = data.choices[0].message.content;
+        contentStr = contentStr.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
+        contentStr = contentStr.replace(/```json/g, '').replace(/```/g, '').trim();
+        const settingsData = JSON.parse(contentStr);
+
+        if (!char.phoneData) char.phoneData = {};
+        char.phoneData.settings = settingsData;
+        wcSaveData();
+        renderSettingsUI(settingsData);
+        wcShowSuccess("状态更新成功");
+
+    } catch (e) {
+        console.error(e);
+        wcShowError("生成失败");
+    }
+}
+
+function renderSettingsUI(data) {
+    const content = document.getElementById('wc-phone-settings-content');
+    
+    let appUsageHtml = '';
+    if (data.appUsage && data.appUsage.length > 0) {
+        data.appUsage.forEach(app => {
+            appUsageHtml += `
+                <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee;">
+                    <span>${app.name}</span>
+                    <span style="color: #888;">${app.time}</span>
+                </div>
+            `;
+        });
+    } else {
+        appUsageHtml = '<div style="color:#999; text-align:center; padding:10px;">暂无数据</div>';
+    }
+
+    let locationsHtml = '';
+    if (data.locations && data.locations.length > 0) {
+        data.locations.forEach(loc => {
+            locationsHtml += `
+                <div style="display: flex; padding: 10px 0; border-bottom: 1px solid #eee;">
+                    <div style="width: 60px; color: #888; font-size: 13px;">${loc.time}</div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 500;">${loc.place}</div>
+                        <div style="font-size: 12px; color: #888;">${loc.desc}</div>
+                    </div>
+                </div>
+            `;
+        });
+    }
+        else {
+        locationsHtml = '<div style="color:#999; text-align:center; padding:10px;">暂无行程记录</div>';
+    }
+
+    content.innerHTML = `
+        <div style="background: #fff; border-radius: 10px; padding: 16px; margin-bottom: 16px;">
+            <div style="font-size: 16px; font-weight: 600; margin-bottom: 10px;">电池</div>
+            <div style="display: flex; align-items: center;">
+                <div style="flex: 1; height: 20px; background: #eee; border-radius: 10px; overflow: hidden;">
+                    <div style="width: ${data.battery}%; height: 100%; background: #34C759;"></div>
+                </div>
+                <span style="margin-left: 10px; font-weight: bold;">${data.battery}%</span>
+            </div>
+        </div>
+
+        <div style="background: #fff; border-radius: 10px; padding: 16px; margin-bottom: 16px;">
+            <div style="font-size: 16px
+; font-weight: 600; margin-bottom: 10px;">屏幕使用时间</div>
+            <div style="font-size: 24px; font-weight: bold; margin-bottom: 16px;">${data.screenTime}</div>
+            <div style="font-size: 14px; color: #888; margin-bottom: 8px;">应用使用排行</div>
+            ${appUsageHtml}
+        </div>
+
+        <div style="background: #fff; border-radius: 10px; padding: 16px;">
+            <div style="font-size: 16px; font-weight: 600; margin-bottom: 10px;">今日行程记录</div>
+            ${locationsHtml}
+        </div>
+    `;
+}
+
 // --- Phone Message Logic ---
 
 function wcConfirmGenerateChats() {
@@ -4827,6 +5130,7 @@ async function wcGeneratePhoneChats() {
     const apiConfig = await idb.get('ios_theme_api_config');
     if (!apiConfig || !apiConfig.key) return alert("请先配置 API");
 
+    // 检查限制
     const limit = apiConfig.limit || 50;
     if (limit > 0 && sessionApiCallCount >= limit) {
         wcShowError("已达到API调用上限");
@@ -4843,6 +5147,7 @@ async function wcGeneratePhoneChats() {
             content: m.content
         }));
         
+        // 核心修改：提取最近30条聊天记录作为上下文
         const recentMsgs = realMsgs.slice(-30).map(m => `${m.sender==='me'?'User':char.name}: ${m.content}`).join('\n');
         
         const contactNames = char.phoneData.contacts
@@ -4870,6 +5175,7 @@ async function wcGeneratePhoneChats() {
         const timeString = `${year}年${month}月${date}日 ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
         const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
 
+        // 核心修改：注入“偷看手机”和“剧情联动”的Prompt
         let prompt = `你扮演角色：${char.name}。\n`;
         prompt += `人设：${char.prompt}\n${wbInfo}\n`;
         prompt += `【当前现实时间】：${timeString} ${dayString}\n`;
@@ -4882,7 +5188,7 @@ async function wcGeneratePhoneChats() {
         prompt += `【通讯录名单】：${contactNames}\n`;
         prompt += `2. NPC的聊天内容必须和我们最近的聊天产生**强烈的剧情联动**（例如：背着我和闺蜜讨论我、暴露对我撒的谎、或者因为我最近的举动而向别人求助/抱怨等）。\n`;
         prompt += `3. 充满偷看手机时的“背德感”和“信息量”，让我看到你背地里真实的一面。\n`;
-        prompt += `4. **重点**：对于每个对话，必须生成最近的 **10-15条** 具体聊天记录(history)，对话要连贯、有来有回，不要只有一两句。\n`;
+        prompt += `4. 对于每个对话，必须生成最近的 3-5 条具体聊天记录(history)。\n`;
         prompt += `【格式要求】：返回一个纯 JSON 数组，不要 Markdown。格式如下：\n`;
         prompt += `[
   {
@@ -5074,18 +5380,10 @@ async function wcSimTriggerAI() {
     const chat = char.phoneData.chats.find(c => c.id === wcActiveSimChatId);
     if (!chat) return;
 
-    // --- 核心修复：获取 NPC 的详细设定 (Persona) ---
-    let npcPersona = chat.desc || "普通朋友";
-    if (char.phoneData.contacts) {
-        const contact = char.phoneData.contacts.find(c => c.name === chat.name);
-        if (contact && contact.desc) {
-            npcPersona = contact.desc;
-        }
-    }
-
     const apiConfig = await idb.get('ios_theme_api_config');
     if (!apiConfig || !apiConfig.key) return alert("请配置 API");
 
+    // 检查限制
     const limit = apiConfig.limit || 50;
     if (limit > 0 && sessionApiCallCount >= limit) {
         wcShowError("已达到API调用上限");
@@ -5101,24 +5399,15 @@ async function wcSimTriggerAI() {
     try {
         const now = new Date();
         const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-        
-        // --- 核心修复：注入世界书和 Char 人设 ---
-        const chatConfig = char.chatConfig || {};
-        let wbInfo = "";
-        if (worldbookEntries.length > 0) {
-            const linkedIds = chatConfig.worldbookEntries || [];
-            const linkedEntries = worldbookEntries.filter(e => linkedIds.includes(e.id.toString()));
-            const entriesToUse = linkedEntries.length > 0 ? linkedEntries : worldbookEntries.slice(0, 10);
-            wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
-        }
 
         let prompt = "";
         
+        // --- 核心修复：群聊逻辑与碎片化 ---
         if (chat.isGroup) {
             prompt += `你正在模拟一个名为【${chat.name}】的微信群聊。\n`;
-            prompt += `群聊背景：${npcPersona}\n`;
-            prompt += `群里的人正在跟群成员【${char.name}】聊天。\n`;
-            prompt += `【任务】：请以群里其他成员的身份回复【${char.name}】的消息。\n`;
+            prompt += `群聊背景：${chat.desc || '无'}\n`;
+            prompt += `群里的人正在跟群成员【${char.name}】(User扮演) 聊天。\n`;
+            prompt += `【任务】：请以群里其他成员的身份回复消息。\n`;
             prompt += `【要求】：\n`;
             prompt += `1. 可以是一个人回复，也可以是几个人七嘴八舌。\n`;
             prompt += `2. 必须返回 JSON 数组，每个对象必须包含 "senderName" (发送者名字)。\n`;
@@ -5126,30 +5415,25 @@ async function wcSimTriggerAI() {
         } else {
             // 单聊逻辑
             prompt += `你现在扮演角色：${chat.name}。\n`;
-            prompt += `你的身份/人设/背景：${npcPersona}\n`;
+            prompt += `你的身份/背景：${chat.desc || '普通朋友'}\n`;
             prompt += `你正在跟【${char.name}】进行微信聊天。\n`;
-            prompt += `【任务】：回复【${char.name}】的消息。\n`;
+            prompt += `【任务】：回复 ${char.name} 的消息。\n`;
             prompt += `【要求】：返回 JSON 数组，格式示例：[{"content":"好的"}]\n`;
         }
         
         prompt += `\n【当前时间】：${timeString}\n`;
-        prompt += `【重要设定】：\n`;
-        prompt += `1. 你不是 ${char.name}！你是 ${chat.name}。\n`;
-        prompt += `2. 你的对话对象是 ${char.name}，Ta 的人设是：${char.prompt}\n`;
-        prompt += `3. ${wbInfo}\n`;
+        prompt += `【${char.name} 的人设】：${char.prompt}\n`;
         
         // 注入活人运转规则
         prompt += `\n【角色活人运转规则】\n`;
         prompt += `> 必须像真人一样聊天，拒绝机械回复。\n`;
-        prompt += `> 必须严格遵守你(${chat.name})的人设设定，不要OOC。\n`;
         prompt += `> 必须将长回复拆分成多条短消息（1-4条），严禁把所有话挤在一个气泡里！\n`;
-        prompt += `> 【重要约束】：绝对不要凭空捏造没有发生过的事情。请严格基于现有的聊天记录上下文进行自然的日常问候、吐槽或顺延当前话题。\n`;
-        prompt += `> 【身份约束】：绝对不能以 ${char.name} 的口吻说话！你只能扮演 ${chat.name} (或群成员)！绝对不能虚构 ${char.name} 的回复或动作！\n`;
+        prompt += `> 【重要约束】：绝对不要凭空捏造没有发生过的事情、没有做过的约定或不存在的剧情。请严格基于现有的聊天记录上下文进行自然的日常问候、吐槽或顺延当前话题。\n`;
         prompt += `> 【格式约束】：你必须先输出 <thinking> 标签进行思考，然后再输出 JSON 数组。严禁将一句话强行拆断！\n`;
         
         // 注入最近聊天记录
         prompt += `\n【最近聊天记录】：\n`;
-        const recentHistory = (chat.history || []).slice(-15); // 增加历史记录长度
+        const recentHistory = (chat.history || []).slice(-10);
         recentHistory.forEach(h => {
             const speaker = h.sender === 'me' ? char.name : (h.name || chat.name);
             prompt += `${speaker}: ${h.content}\n`;
@@ -5197,6 +5481,8 @@ async function wcSimTriggerAI() {
                 replies = [{ content: cleanText }];
             }
         }
+
+        // 移除强制拆分逻辑，信任 AI 的 JSON 结构
 
         if (!chat.history) chat.history = [];
 
@@ -5544,61 +5830,11 @@ function wcShowPhoneContactDetail(contact) {
         let avatarUrl = contact.avatar || getRandomNpcAvatar();
         avatarEl.innerHTML = `<img src="${avatarUrl}" style="width:100%;height:100%;object-fit:cover;">`;
         document.getElementById('wc-card-contact-actions').style.display = 'flex';
-        
-        // --- 核心修改：添加编辑按钮 ---
-        const actionsDiv = document.getElementById('wc-card-contact-actions');
-        // 检查是否已经有编辑按钮，避免重复添加
-        if (!document.getElementById('wc-btn-edit-contact')) {
-            const editBtn = document.createElement('button');
-            editBtn.id = 'wc-btn-edit-contact';
-            editBtn.className = 'wc-btn-secondary';
-            editBtn.style.width = '100%';
-            editBtn.style.marginTop = '10px';
-            editBtn.innerText = '编辑资料';
-            editBtn.onclick = wcEditPhoneContact;
-            actionsDiv.appendChild(editBtn);
-        }
     }
     
     const modal = document.getElementById('wc-modal-phone-contact-card');
     modal.style.display = 'flex'; 
     wcOpenModal('wc-modal-phone-contact-card');
-}
-
-// --- 新增：编辑 NPC 资料 ---
-function wcEditPhoneContact() {
-    if (!currentPhoneContact) return;
-    const name = prompt("修改名字:", currentPhoneContact.name);
-    if (name !== null) {
-        const desc = prompt("修改简介/人设:", currentPhoneContact.desc);
-        if (desc !== null) {
-            wcSavePhoneContact(name, desc);
-        }
-    }
-}
-
-function wcSavePhoneContact(newName, newDesc) {
-    if (!currentPhoneContact) return;
-    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
-    if (!char || !char.phoneData || !char.phoneData.contacts) return;
-
-    const contact = char.phoneData.contacts.find(c => c.id === currentPhoneContact.id);
-    if (contact) {
-        contact.name = newName;
-        contact.desc = newDesc;
-        
-        // 同步更新聊天列表中的名字
-        if (char.phoneData.chats) {
-            const chat = char.phoneData.chats.find(c => c.name === currentPhoneContact.name); // 用旧名字找
-            if (chat) {
-                chat.name = newName;
-            }
-        }
-        
-        wcSaveData();
-        wcRenderPhoneContacts();
-        wcShowPhoneContactDetail(contact); // 刷新卡片
-    }
 }
 
 function wcDeletePhoneContact() {
@@ -5637,12 +5873,7 @@ function wcShareContactToMain() {
     wcSaveData();
     
     const char = wcState.characters.find(c => c.id === wcState.editingCharId);
-    
-    // --- 核心修改：明确系统提示，避免 AI 混淆是谁添加了谁 ---
-    wcAddMessage(char.id, 'system', 'system', 
-        `[系统提示] User (你) 从 ${char.name} 的手机通讯录中，将 "${name}" 的名片分享给了自己，并添加到了 User 的主通讯录中。`, 
-        { style: 'transparent', hidden: true }
-    );
+    wcAddMessage(char.id, 'system', 'system', `[系统提示] 你将 "${name}" 添加到了你的联系人列表。`, { style: 'transparent', hidden: true });
     
     wcCloseModal('wc-modal-phone-contact-card');
     alert(`已将 ${name} 添加到主聊天列表！`);
@@ -6100,7 +6331,6 @@ const lsState = {
     pendingCharId: null, 
     startDate: null, 
     isLinked: false, 
-    locationSyncEnabled: false, // 新增：位置同步状态
     npcFreq: 30, 
     feed: [], 
     npcInterval: null, 
@@ -6129,7 +6359,6 @@ async function lsLoadData() {
         lsState.pendingCharId = data.pendingCharId;
         lsState.startDate = data.startDate;
         lsState.isLinked = data.isLinked || false;
-        lsState.locationSyncEnabled = data.locationSyncEnabled || false; // 新增：读取状态
         lsState.npcFreq = data.npcFreq !== undefined ? data.npcFreq : 30;
         lsState.feed = data.feed || [];
         lsState.widgetEnabled = data.widgetEnabled || false;
@@ -6147,7 +6376,6 @@ async function lsSaveData() {
         pendingCharId: lsState.pendingCharId,
         startDate: lsState.startDate,
         isLinked: lsState.isLinked,
-        locationSyncEnabled: lsState.locationSyncEnabled, // 新增：保存状态
         npcFreq: lsState.npcFreq,
         feed: lsState.feed,
         widgetEnabled: lsState.widgetEnabled,
@@ -6289,10 +6517,6 @@ function lsRenderMain() {
 
     document.getElementById('ls-toggle-link').checked = lsState.isLinked;
     
-    // 新增：渲染位置同步开关状态
-    const toggleLoc = document.getElementById('ls-toggle-location');
-    if (toggleLoc) toggleLoc.checked = lsState.locationSyncEnabled;
-    
     const npcFreqInput = document.getElementById('ls-npc-freq');
     if (npcFreqInput) npcFreqInput.value = lsState.npcFreq;
 
@@ -6347,18 +6571,6 @@ function lsSwitchTab(tabName) {
 function lsToggleLink(checkbox) {
     lsState.isLinked = checkbox.checked;
     lsSaveData();
-}
-
-// 新增：处理位置同步开关
-function lsToggleLocationSync(checkbox) {
-    lsState.locationSyncEnabled = checkbox.checked;
-    lsSaveData();
-    if (checkbox.checked) {
-        // 开启时，主动请求一次运动权限并获取一次位置
-        requestMotionPermission();
-        updateGlobalLocation();
-        alert("已开启同步！对方现在能感知你的步数和位置了。");
-    }
 }
 
 function lsUpdateNpcFreq(val) {
@@ -6666,7 +6878,7 @@ async function lsCheckNpcTrigger() {
     }
 }
 
-// --- 修复：NPC 消息接收不全与群聊 OOC (增强版：读取设定+防OOC) ---
+// --- 修复：NPC 消息接收不全与群聊 OOC ---
 async function lsTriggerNpcMessage() {
     const char = wcState.characters.find(c => c.id === lsState.boundCharId);
     if (!char || !char.phoneData || !char.phoneData.contacts) return;
@@ -6674,7 +6886,6 @@ async function lsTriggerNpcMessage() {
     const contacts = char.phoneData.contacts.filter(c => !c.isUser);
     if (contacts.length === 0) return;
     
-    // 随机选择一个 NPC
     const npc = contacts[Math.floor(Math.random() * contacts.length)];
     
     const apiConfig = await idb.get('ios_theme_api_config');
@@ -6683,76 +6894,46 @@ async function lsTriggerNpcMessage() {
     try {
         const chatConfig = char.chatConfig || {};
         
-        // 1. 构建世界书信息
         let wbInfo = "";
         if (worldbookEntries.length > 0) {
             const linkedIds = chatConfig.worldbookEntries || [];
             const linkedEntries = worldbookEntries.filter(e => linkedIds.includes(e.id.toString()));
             const entriesToUse = linkedEntries.length > 0 ? linkedEntries : worldbookEntries.slice(0, 10);
-            wbInfo = "【世界观/背景设定】:\n" + entriesToUse.map(e => `- ${e.title}: ${e.desc}`).join('\n');
+            wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
         }
 
         const now = new Date();
         const dayString = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()];
         const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
-        // 2. 获取 NPC 的详细设定 (确保读取最新的 desc)
-        // 注意：npc 对象本身就是从 contacts 数组里取出来的，所以 npc.desc 就是最新的
-        const npcPersona = npc.desc || "普通朋友";
-
         let prompt = "";
-        
-        // 3. 构建 Prompt
         if (npc.type === 'group') {
             prompt += `你正在模拟一个名为【${npc.name}】的微信群聊。\n`;
-            prompt += `【群聊背景/成员设定】：${npcPersona}\n`;
-            prompt += `群成员正在聊天。请生成 1-3 条群消息，主动发给群成员【${char.name}】。\n`;
+            prompt += `群聊背景/描述：${npc.desc}\n`;
+            prompt += `群成员正在聊天。请生成 1-3 条群消息。\n`;
             prompt += `【重要】：你需要扮演群里的不同成员发言。不要扮演“群聊系统”，要扮演具体的人。\n`;
             prompt += `【输出格式】：JSON数组，必须包含 senderName (发言人名字)。\n`;
             prompt += `示例：[{"type":"text", "senderName":"老王", "content":"今晚去哪吃？"}, {"type":"text", "senderName":"小李", "content":"吃火锅吧"}]\n`;
         } else {
             prompt += `你现在扮演角色：${npc.name}。\n`;
-            prompt += `【你的身份/性格/背景设定】：${npcPersona}\n`;
-            prompt += `你正在主动给你的熟人【${char.name}】发微信。\n`;
+            prompt += `你的身份/背景：${npc.desc}\n`;
+            prompt += `你正在给你的熟人【${char.name}】发微信。\n`;
             prompt += `【输出格式】：JSON数组。\n`;
             prompt += `示例：[{"type":"text", "content":"在吗？"}, {"type":"text", "content":"有个事想跟你说"}]\n`;
         }
         
         prompt += `\n【当前时间】：${timeString} ${dayString}\n`;
-        prompt += `【重要：身份隔离】：\n`;
-        prompt += `1. 你不是 ${char.name}！你是 ${npc.name}。\n`;
-        prompt += `2. ${char.name} 是接收你消息的人，${char.name} 的人设是：${char.prompt}\n`;
-        prompt += `3. 请根据 ${char.name} 的人设和你的设定，推测你们之间的关系和说话语气。\n`;
+        prompt += `【${char.name} 的人设】：${char.prompt}\n`;
         prompt += `${wbInfo}\n`;
-
-        // 4. 注入最近聊天记录 (防止NPC凭空捏造，让它顺着之前的话题聊)
-        let chat = char.phoneData.chats ? char.phoneData.chats.find(c => c.name === npc.name) : null;
-        if (chat && chat.history && chat.history.length > 0) {
-            prompt += `\n【最近聊天记录】：\n`;
-            const recentHistory = chat.history.slice(-10);
-            recentHistory.forEach(h => {
-                const speaker = h.sender === 'me' ? char.name : (h.name || npc.name);
-                prompt += `${speaker}: ${h.content}\n`;
-            });
-        }
+        prompt += `内容要求：口语化，生活化，符合人设。拒绝油腻和AI味。\n`;
         
-        // 5. 注入物理状态 (位置同步)
-        if (lsState.isLinked && lsState.boundCharId === char.id && lsState.locationSyncEnabled) {
-            const distance = (privacyStepCount * 0.7 / 1000).toFixed(2);
-            prompt += `\n【额外信息】：\n`;
-            prompt += `用户(User)向你共享了Ta的实时设备数据：\n`;
-            prompt += `- 当前位置：${globalCurrentAddress}\n`;
-            prompt += `- 今日步数：${privacyStepCount} 步\n`;
-            prompt += `(你可以以此为话题主动找Ta聊天，比如发现Ta在某个地方，或者今天走了很多路。)\n`;
-        }
+        // 注入活人运转与思维链规则
+        prompt += `【角色活人运转规则】\n`;
+        prompt += `> 必须像真人一样聊天，拒绝机械回复。\n`;
+        prompt += `> 必须将长回复拆分成多条短消息（1-4条），严禁把所有话挤在一个气泡里！\n`;
+        prompt += `> 【重要约束】：绝对不要凭空捏造没有发生过的事情、没有做过的约定或不存在的剧情。请严格基于现有的聊天记录上下文进行自然的日常问候、吐槽或顺延当前话题。\n`;
+        prompt += `> 【格式约束】：你必须先输出 <thinking> 标签进行思考，然后再输出 JSON 数组。严禁将一句话强行拆断！\n`;
 
-        // 6. 核心防 OOC 指令
-        prompt += `\n【🚫 绝对禁止 OOC (Out Of Character)】\n`;
-        prompt += `1. **严格遵守设定**：你的回复必须完全符合【${npc.name}】的设定(${npcPersona})。如果设定是高冷，就不要热情；如果设定是粗鲁，就不要文雅。\n`;
-        prompt += `2. **世界观一致性**：如果世界书中有相关设定，必须遵守。\n`;
-        prompt += `3. **拒绝机械感**：说话要口语化、生活化，像真人一样。可以使用表情包(sticker)。\n`;
-        prompt += `4. **不要扮演 ${char.name}**：绝对不要生成 ${char.name} 的回复！你只负责生成 ${npc.name} 的消息。\n`;
-        
         const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.key}` },
@@ -6784,12 +6965,12 @@ async function lsTriggerNpcMessage() {
             console.error("JSON Parse Error", e);
         }
 
+        // 移除强制拆分逻辑，信任 AI 的 JSON 结构
+
         if (actions.length === 0) return;
 
         if (!char.phoneData.chats) char.phoneData.chats = [];
-        
-        // 复用 chat 变量
-        chat = char.phoneData.chats.find(c => c.name === npc.name);
+        let chat = char.phoneData.chats.find(c => c.name === npc.name);
         
         if (!chat) {
             chat = {
@@ -6837,14 +7018,6 @@ async function lsTriggerNpcMessage() {
         
         lsAddFeed(`${npc.name} 给 ${char.name} 发送了消息: "${allContentCombined.trim()}"`, chat.avatar);
 
-        // --- 新增：可见的系统提示 (不显示具体内容) ---
-        wcAddMessage(char.id, 'system', 'system', 
-            `${npc.name} 给 ${char.name} 发送了消息`, 
-            { style: 'transparent' } // 使用透明背景样式，看起来像灰色小字
-        );
-        // -------------------------------------------
-
-        // 原有的隐藏提示 (包含具体内容，供 AI 读取)
         wcAddMessage(char.id, 'system', 'system', 
             `[系统提示: 你的手机收到了一条来自 "${npc.name}" 的微信消息: "${allContentCombined.trim()}"。]`, 
             { hidden: true }
@@ -7339,8 +7512,7 @@ async function wcGeneratePrivacyAndFavorites() {
 
         if (!char.phoneData) char.phoneData = {};
         
-        if (resultData.privacy
-) char.phoneData.privacy = resultData.privacy;
+        if (resultData.privacy) char.phoneData.privacy = resultData.privacy;
         if (resultData.favorites) char.phoneData.favorites = resultData.favorites;
         
         wcSaveData();
@@ -7721,8 +7893,7 @@ async function wcGeneratePhoneBrowser() {
         prompt += `请基于你的人设、我的设定，以及我们**最近的聊天上下文**，生成你的浏览器数据。\n`;
         prompt += `【要求】：\n`;
         prompt += `1. 生成 4 至 8 条浏览记录 (history)。标题必须反映你最近在偷偷搜索或关注什么（比如因为聊天中的某件事去查资料、查怎么回复我、查某种情感等）。必须包含你当时的内心批注 (annotation)。\n`;
-        // --- 修改点：数量改为 2 至 5 个 ---
-        prompt += `2. 生成 2 至 5 个论坛帖子 (posts)。可以是你在匿名论坛发帖求助/吐槽，也可以是你浏览了别人的帖子并在下面评论。每个帖子必须包含 5 至 10 个评论 (comments)，评论里要有网友的回复，也要有你的互动。\n`;
+        prompt += `2. 生成 1 至 3 个论坛帖子 (posts)。可以是你在匿名论坛发帖求助/吐槽，也可以是你浏览了别人的帖子并在下面评论。每个帖子必须包含 5 至 10 个评论 (comments)，评论里要有网友的回复，也要有你的互动。\n`;
         prompt += `3. 返回纯 JSON 对象，格式如下：\n`;
         prompt += `{
   "history": [
@@ -7769,326 +7940,6 @@ async function wcGeneratePhoneBrowser() {
         wcShowError("生成失败");
     }
 }
-
-// 1. 修复：允许编辑NPC简介设定，避免OOC (适配长文本滚动版 + 防闪烁)
-window.wcShowPhoneContactDetail = function(contact) {
-    currentPhoneContact = contact;
-    document.getElementById('wc-card-contact-name').innerText = contact.name;
-    
-    const descEl = document.getElementById('wc-card-contact-desc');
-    descEl.innerText = contact.desc || "暂无介绍";
-    
-    // 确保样式允许长文本显示
-    descEl.style.display = "block"; 
-    descEl.style.webkitLineClamp = "unset"; 
-    descEl.style.overflow = "visible";
-    
-    // 新增：允许点击编辑NPC简介设定
-    if (!contact.isUser) {
-        // 核心修复：传入 event 对象
-        descEl.onclick = (e) => {
-            e.stopPropagation(); // 阻止事件冒泡，防止触发底层卡片的其他事件
-            
-            wcOpenIOSTextEdit("编辑 NPC 设定", "修改简介会影响 NPC 的回复风格", contact.desc, (newDesc) => {
-                if (newDesc !== null && newDesc.trim() !== "") {
-                    contact.desc = newDesc.trim();
-                    descEl.innerText = contact.desc;
-                    wcSaveData();
-                }
-            });
-        };
-        descEl.style.cursor = "pointer";
-        descEl.title = "点击编辑设定";
-        descEl.style.textDecoration = "underline";
-        descEl.style.textDecorationStyle = "dashed";
-        descEl.style.textUnderlineOffset = "4px";
-    } else {
-        descEl.onclick = null;
-        descEl.style.cursor = "default";
-        descEl.title = "";
-        descEl.style.textDecoration = "none";
-    }
-    
-    const avatarEl = document.getElementById('wc-card-contact-avatar');
-    avatarEl.style.background = 'transparent'; 
-    
-    if (contact.isUser) {
-        const char = wcState.characters.find(c => c.id === wcState.editingCharId);
-        const userAvatar = (char.chatConfig && char.chatConfig.userAvatar) ? char.chatConfig.userAvatar : wcState.user.avatar;
-        avatarEl.innerHTML = `<img src="${userAvatar}" style="width:100%;height:100%;object-fit:cover;">`;
-        document.getElementById('wc-card-contact-actions').style.display = 'none';
-    } else {
-        let avatarUrl = contact.avatar || getRandomNpcAvatar();
-        avatarEl.innerHTML = `<img src="${avatarUrl}" style="width:100%;height:100%;object-fit:cover;">`;
-        document.getElementById('wc-card-contact-actions').style.display = 'flex';
-    }
-    
-    const modal = document.getElementById('wc-modal-phone-contact-card');
-    modal.style.display = 'flex'; 
-    wcOpenModal('wc-modal-phone-contact-card');
-};
-
-// 2. 修复：分享联系人到主列表时，明确是User添加到了User的通讯录
-window.wcShareContactToMain = function() {
-    if (!currentPhoneContact) return;
-    
-    const name = currentPhoneContact.name;
-    const desc = currentPhoneContact.desc;
-    const avatar = currentPhoneContact.avatar || getRandomNpcAvatar(); 
-
-    const newChar = {
-        id: Date.now(),
-        name: name,
-        note: name,
-        prompt: `你扮演 ${name}。背景设定：${desc}。`,
-        avatar: avatar,
-        isPinned: false
-    };
-    
-    wcState.characters.push(newChar);
-    wcSaveData();
-    
-    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
-    if (char) {
-        // 修复：明确告诉char，是User把这个NPC加到了User自己的通讯录里，而不是char的通讯录
-        wcAddMessage(char.id, 'system', 'system', `[系统提示] User(玩家)已将你的联系人 "${name}" 添加到了User自己的微信通讯录中。`, { style: 'transparent', hidden: true });
-    }
-    
-    wcCloseModal('wc-modal-phone-contact-card');
-    alert(`已将 ${name} 添加到您的主聊天列表！`);
-    
-    wcRenderAll();
-};
-
-// 3. 修复：NPC回复时增加上下文长度，引入NPC设定、Char设定和世界书，避免OOC
-window.wcSimTriggerAI = async function() {
-    const char = wcState.characters.find(c => c.id === wcState.editingCharId);
-    if (!char || !char.phoneData || !char.phoneData.chats) return;
-    
-    const chat = char.phoneData.chats.find(c => c.id === wcActiveSimChatId);
-    if (!chat) return;
-
-    const apiConfig = await idb.get('ios_theme_api_config');
-    if (!apiConfig || !apiConfig.key) return alert("请配置 API");
-
-    // 检查限制
-    const limit = apiConfig.limit || 50;
-    if (limit > 0 && sessionApiCallCount >= limit) {
-        wcShowError("已达到API调用上限");
-        return;
-    }
-    sessionApiCallCount++;
-
-    const btn = document.querySelector('#wc-sim-chat-footer button:last-child');
-    if(btn) btn.disabled = true;
-
-    wcShowLoading("正在生成...");
-
-    try {
-        const now = new Date();
-        const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-
-        // 引入世界书
-        const chatConfig = char.chatConfig || {};
-        let wbInfo = "";
-        if (worldbookEntries.length > 0) {
-            const linkedIds = chatConfig.worldbookEntries || [];
-            const linkedEntries = worldbookEntries.filter(e => linkedIds.includes(e.id.toString()));
-            const entriesToUse = linkedEntries.length > 0 ? linkedEntries : worldbookEntries.slice(0, 10);
-            wbInfo = "【世界观参考】:\n" + entriesToUse.map(e => `${e.title}: ${e.desc}`).join('\n');
-        }
-
-        // 查找NPC的详细设定
-        let npcDesc = chat.desc || '普通朋友';
-        const contact = char.phoneData.contacts.find(c => c.name === chat.name);
-        if (contact && contact.desc) {
-            npcDesc = contact.desc;
-        }
-
-        let prompt = "";
-        
-        // --- 核心修复：群聊逻辑与碎片化，加入NPC设定与世界书 ---
-        if (chat.isGroup) {
-            prompt += `你正在模拟一个名为【${chat.name}】的微信群聊。\n`;
-            prompt += `群聊背景及成员设定：${npcDesc}\n`;
-            prompt += `群里的人正在跟群成员【${char.name}】(User扮演) 聊天。\n`;
-            prompt += `【任务】：请以群里其他成员的身份回复【${char.name}】的消息。\n`;
-            prompt += `【要求】：\n`;
-            prompt += `1. 可以是一个人回复，也可以是几个人七嘴八舌。\n`;
-            prompt += `2. 必须返回 JSON 数组，每个对象必须包含 "senderName" (发送者名字)。\n`;
-            prompt += `3. 格式示例：[{"senderName":"张三", "content":"哈哈哈哈"}, {"senderName":"李四", "content":"确实"}]\n`;
-        } else {
-            // 单聊逻辑
-            prompt += `你现在扮演角色：${chat.name}。\n`;
-            prompt += `你的身份/背景/性格设定：${npcDesc}\n`;
-            prompt += `你正在跟【${char.name}】进行微信聊天。\n`;
-            prompt += `【任务】：回复【${char.name}】的消息。\n`;
-            prompt += `【要求】：返回 JSON 数组，格式示例：[{"content":"好的"}]\n`;
-        }
-        
-        prompt += `\n【当前时间】：${timeString}\n`;
-        prompt += `【注意】：你不是 ${char.name}！你是 ${chat.name}。${char.name} 是正在和你聊天的人，${char.name} 的人设是：${char.prompt}\n`;
-        prompt += `${wbInfo}\n`;
-        
-        // 注入活人运转规则
-        prompt += `\n【角色活人运转规则】\n`;
-        prompt += `> 必须像真人一样聊天，拒绝机械回复。严格遵循你的身份设定(${npcDesc})，绝对不能OOC！\n`;
-        prompt += `> 必须将长回复拆分成多条短消息（1-4条），严禁把所有话挤在一个气泡里！\n`;
-        prompt += `> 【重要约束】：绝对不要凭空捏造没有发生过的事情、没有做过的约定或不存在的剧情。请严格基于现有的聊天记录上下文进行自然的日常问候、吐槽或顺延当前话题。\n`;
-        prompt += `> 【身份约束】：绝对不能以 ${char.name} 的口吻说话！你只能扮演 ${chat.name} (或群成员)！绝对不能虚构 ${char.name} 的回复或动作！\n`;
-        prompt += `> 【格式约束】：你必须先输出 <thinking> 标签进行思考，然后再输出 JSON 数组。严禁将一句话强行拆断！\n`;
-        
-        // 注入最近聊天记录 (增加到 30 条)
-        prompt += `\n【最近聊天记录】：\n`;
-        const recentHistory = (chat.history || []).slice(-30);
-        recentHistory.forEach(h => {
-            const speaker = h.sender === 'me' ? char.name : (h.name || chat.name);
-            prompt += `${speaker}: ${h.content}\n`;
-        });
-        
-        if (chat.isGroup) {
-            prompt += `(群成员发言):`;
-        } else {
-            prompt += `${chat.name}:`;
-        }
-
-        const response = await fetch(`${apiConfig.baseUrl}/chat/completions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.key}` },
-            body: JSON.stringify({
-                model: apiConfig.model,
-                messages: [{ role: "user", content: prompt }],
-                temperature: 0.8
-            })
-        });
-
-        const data = await response.json();
-        let content = data.choices[0].message.content.trim();
-        
-        // 解析 JSON
-        let replies = [];
-        try {
-            let cleanText = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
-            cleanText = cleanText.replace(/```json/g, '').replace(/```/g, '').trim();
-            const start = cleanText.indexOf('[');
-            const end = cleanText.lastIndexOf(']');
-            if (start !== -1 && end !== -1) {
-                cleanText = cleanText.substring(start, end + 1);
-                replies = JSON.parse(cleanText);
-            } else {
-                // 尝试解析单个对象
-                const regex = /\{.*?\}/g;
-                const matches = cleanText.match(regex);
-                if (matches) replies = matches.map(m => JSON.parse(m));
-            }
-        } catch (e) {
-            // 降级：如果解析失败，当纯文本处理 (仅限单聊)
-            if (!chat.isGroup) {
-                let cleanText = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
-                replies = [{ content: cleanText }];
-            }
-        }
-
-        if (!chat.history) chat.history = [];
-
-        const meAvatar = char.avatar;
-        let themAvatar = chat.avatar;
-        if (!themAvatar) {
-             const contact = char.phoneData.contacts.find(c => c.name === chat.name);
-             themAvatar = contact ? contact.avatar : getRandomNpcAvatar();
-        }
-
-        wcShowSuccess("回复成功");
-
-        for (const reply of replies) {
-            if (reply.content) {
-                await wcDelay(1500); 
-                
-                // 构造消息对象
-                const newMsg = { 
-                    sender: 'them', 
-                    content: reply.content,
-                    name: reply.senderName || null // 存入发送者名字
-                };
-                
-                chat.history.push(newMsg);
-                
-                // 更新最后一条消息预览
-                let preview = reply.content;
-                if (chat.isGroup && reply.senderName) {
-                    preview = `${reply.senderName}: ${preview}`;
-                }
-                chat.lastMsg = preview;
-                chat.time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                
-                wcSaveData();
-                renderSimHistory(chat.history, meAvatar, themAvatar, chat.isGroup); // 传入 isGroup
-                wcRenderPhoneChats();
-            }
-        }
-
-    } catch (e) {
-        console.error(e);
-        wcShowError("AI 回复失败");
-    } finally {
-        if(btn) btn.disabled = false;
-    }
-};
-
-// --- 新增：iOS 风格通用文本编辑逻辑 ---
-let iosEditCallback = null;
-
-function wcOpenIOSTextEdit(title, desc, initialValue, callback) {
-    document.getElementById('wc-ios-edit-title').innerText = title;
-    const descEl = document.getElementById('wc-ios-edit-desc');
-    if (desc) {
-        descEl.innerText = desc;
-        descEl.style.display = 'block';
-    } else {
-        descEl.style.display = 'none';
-    }
-    
-    const input = document.getElementById('wc-ios-edit-input');
-    input.value = initialValue || '';
-    
-    iosEditCallback = callback;
-    wcOpenModal('wc-modal-ios-text-edit');
-    
-    // 核心修复：将延迟从 100ms 增加到 300ms。
-    // 必须等弹窗的 CSS 动画 (0.2s) 完全结束且稳定后，再呼出键盘，否则会导致渲染引擎闪烁。
-    setTimeout(() => {
-        input.focus();
-        input.setSelectionRange(input.value.length, input.value.length);
-    }, 300);
-}
-
-// 绑定确认按钮事件
-document.addEventListener('DOMContentLoaded', () => {
-    const confirmBtn = document.getElementById('wc-ios-edit-confirm');
-    if (confirmBtn) {
-        confirmBtn.onclick = function() {
-            const val = document.getElementById('wc-ios-edit-input').value;
-            if (iosEditCallback) {
-                iosEditCallback(val);
-            }
-            wcCloseModal('wc-modal-ios-text-edit');
-        };
-    }
-});
-
-// 绑定确认按钮事件 (在 window.onload 中绑定或直接在此处绑定)
-document.addEventListener('DOMContentLoaded', () => {
-    const confirmBtn = document.getElementById('wc-ios-edit-confirm');
-    if (confirmBtn) {
-        confirmBtn.onclick = function() {
-            const val = document.getElementById('wc-ios-edit-input').value;
-            if (iosEditCallback) {
-                iosEditCallback(val);
-            }
-            wcCloseModal('wc-modal-ios-text-edit');
-        };
-    }
-});
 
 // ==========================================================================
 // 全局补丁与覆盖 (Global Patches & Overrides)
